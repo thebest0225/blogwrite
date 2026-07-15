@@ -1,0 +1,17 @@
+{
+  "name": "blog-autowriter-server",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "블로그 오토라이터 - 서버 웹앱 (백엔드: KIE/네이버/구글트렌드/WP 프록시 + 저장)",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

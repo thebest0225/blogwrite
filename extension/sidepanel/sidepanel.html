@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="apptitle">✍️ 블로그 오토라이터</div>
+    <button class="icon-btn" id="openOptions" title="설정">⚙️</button>
+  </header>
+
+  <div id="apiWarn" class="warn hidden">
+    ⚠️ KIE API 키가 없습니다. <a href="#" id="goOptions">설정에서 입력</a> 후 사용하세요.
+  </div>
+
+  <main class="panel">
+    <div class="modebar" id="modeBar">
+      <button class="mode active" data-mode="blogger">블로거 메인</button>
+      <button class="mode" data-mode="naver">네이버</button>
+      <button class="mode" data-mode="wp">워드프레스</button>
+    </div>
+
+    <details class="history" id="trendBox">
+      <summary>🔥 지금 뜨는 트렌드 (6시간마다 갱신 · 클릭해 주제로)</summary>
+      <div class="row" style="margin-top:6px;align-items:center;">
+        <span id="trendMeta" style="font-size:11px;color:#888;flex:1;"></span>
+        <button class="mini" id="trendRefresh">새로고침</button>
+      </div>
+      <div id="trendList" class="history-list"></div>
+    </details>
+
+    <details class="history" id="myPostsBox">
+      <summary>🔗 내 글 보관함 (링크 걸 때 여기서 먼저 찾음)</summary>
+      <div class="row" style="margin-top:8px;">
+        <input type="text" id="myPostSearch" placeholder="보관함 검색 (제목/키워드)" />
+        <button class="mini" id="tabSaveBtn" title="지금 보고 있는 페이지를 저장">📍 현재</button>
+        <button class="mini" id="sheetOpenBtn" title="구글 시트에서 전체 보기">📄 시트</button>
+      </div>
+      <div class="row" style="margin-top:4px;">
+        <input type="text" id="myPostTitle" placeholder="글 제목/키워드" />
+      </div>
+      <div class="row" style="margin-top:4px;">
+        <input type="text" id="myPostUrl" placeholder="https://내글주소" />
+        <button class="mini" id="myPostAdd">추가</button>
+      </div>
+      <div id="myPostsCount" class="hist-count"></div>
+      <div id="myPostsList" class="history-list" style="margin-top:4px;"></div>
+    </details>
+
+    <label class="field">
+      <span>원본 글 (클로드에서 작성해 붙여넣기 · 텍스트/HTML 모두 가능)</span>
+      <textarea id="originalText" rows="6" placeholder="클로드에서 작성한 글을 여기 붙여넣으세요."></textarea>
+    </label>
+
+    <label class="field hidden" id="bloggerUrlRow">
+      <span>메인(블로거) 글 URL — 이 글로 유입시킴</span>
+      <input type="text" id="bloggerUrl" placeholder="https://blog.내주소.com/글주소 (비우면 설정의 내 블로그 주소)" />
+    </label>
+
+    <label class="field">
+      <span>키워드 (선택 · SEO/링크 초점)</span>
+      <input type="text" id="keyword" placeholder="예: 참교육 김무열 / 로봇청소기 추천" />
+    </label>
+
+    <div class="imgrow">
+      <label class="check">
+        <input type="checkbox" id="genImages" />
+        <span>이미지 생성</span>
+      </label>
+      <label class="imgcount">
+        <span>개수</span>
+        <select id="imgCount">
+          <option value="1">1 (썸네일만)</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+        </select>
+      </label>
+      <label class="imgcount">
+        <span>비율</span>
+        <select id="imgAspect">
+          <option value="4:3">4:3</option>
+          <option value="16:9">16:9</option>
+          <option value="1:1">1:1</option>
+        </select>
+      </label>
+    </div>
+
+    <button class="primary" id="generateBtn">✨ 블로거 메인 완성</button>
+
+    <div id="status" class="status hidden"></div>
+
+    <section id="result" class="result hidden">
+      <div class="result-head">
+        <strong>미리보기</strong>
+        <button class="mini primary-mini" id="copyBtn">📋 HTML 복사</button>
+      </div>
+      <div class="result-actions wp-actions hidden" id="wpActions">
+        <button class="mini" id="wpDraftBtn">WP 초안저장</button>
+        <button class="mini primary-mini" id="wpPublishBtn">WP 바로발행</button>
+      </div>
+      <div class="meta-line" id="metaLine"></div>
+      <iframe id="preview" class="preview"></iframe>
+
+      <details class="imgedit hidden" id="imgEditBox">
+        <summary>🖌️ 이미지 수정 / 다시 생성</summary>
+        <div id="imgEditList" class="imgedit-list"></div>
+      </details>
+    </section>
+  </main>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

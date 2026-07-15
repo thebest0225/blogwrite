@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <div class="wrap">
+    <h1>블로그 오토라이터 설정</h1>
+    <p class="sub">API 키·비밀번호는 이 브라우저에만 저장됩니다(chrome.storage.local).</p>
+
+    <section class="card">
+      <h2>🔑 KIE.ai (글 · 이미지 생성)</h2>
+      <label class="field">
+        <span>KIE API 키</span>
+        <input type="password" id="kieApiKey" placeholder="sk-... (kie.ai/api-key 에서 발급)" />
+        <small>발급: <a href="https://kie.ai/api-key" target="_blank">kie.ai/api-key</a></small>
+      </label>
+      <div class="grid2">
+        <label class="field">
+          <span>글 생성 모델</span>
+          <select id="kieChatModel">
+            <option value="claude-sonnet-5">Claude Sonnet 5 (기본·빠름)</option>
+            <option value="claude-opus-4-8">Claude Opus 4.8 (고품질·느림)</option>
+          </select>
+          <small>기본 Sonnet 5, 중요한 글은 Opus 4.8</small>
+        </label>
+        <label class="field">
+          <span>이미지 모델</span>
+          <input type="text" id="kieImageModel" value="gpt-image-2-text-to-image" readonly />
+          <small>GPT Image-2</small>
+        </label>
+      </div>
+      <label class="field">
+        <span>이미지 해상도</span>
+        <select id="imageResolution">
+          <option value="1K">1K (기본)</option>
+          <option value="2K">2K</option>
+          <option value="4K">4K (1:1 제외)</option>
+        </select>
+      </label>
+      <label class="field" style="margin-top:8px;">
+        <span>썸네일 방식</span>
+        <select id="thumbnailMode">
+          <option value="ai_full">AI 통짜 생성 — GPT Image-2가 한글 텍스트까지 (추천)</option>
+          <option value="overlay">AI 배경 + 프로그램 텍스트 오버레이</option>
+          <option value="off">끄기 (원본 이미지만)</option>
+        </select>
+        <small>클릭베이트 스타일이면 'AI 통짜'가 가장 멋집니다. 오탈자 걱정되면 '오버레이'.</small>
+      </label>
+      <label class="field">
+        <span>썸네일 스타일 프롬프트 (AI 통짜 모드 · 영어, 원하는 스타일로 수정 가능)</span>
+        <textarea id="thumbnailStylePrompt" rows="5"></textarea>
+        <small>여기에 원하는 색감/레이아웃을 영어로 적으면 모든 썸네일에 반영됩니다.
+          이전에 저장한 스타일(마스코트·그래프 등)이 남아있으면 아래 버튼으로 초기화하세요.</small>
+        <button id="resetThumbStyle" class="ghost" type="button" style="margin-top:6px;align-self:flex-start;">기본 스타일로 초기화</button>
+      </label>
+      <label class="field">
+        <span>오버레이 액센트 색 (오버레이 모드용)</span>
+        <input type="color" id="overlayAccent" value="#ff2d55" style="width:60px;height:36px;padding:2px;" />
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>🟦 워드프레스 REST (대량 개선 · 직접 발행 · 내부링크)</h2>
+      <label class="field">
+        <span>사이트 주소</span>
+        <input type="text" id="wpSite" placeholder="https://내블로그.com" />
+      </label>
+      <div class="grid2">
+        <label class="field">
+          <span>사용자명</span>
+          <input type="text" id="wpUser" placeholder="워드프레스 아이디" />
+        </label>
+        <label class="field">
+          <span>응용프로그램 비밀번호</span>
+          <input type="password" id="wpAppPassword" placeholder="xxxx xxxx xxxx xxxx" />
+        </label>
+      </div>
+      <small>발급: 워드프레스 관리자 → 사용자 → 프로필 → <b>응용 프로그램 비밀번호</b>에서 생성.
+        일반 로그인 비밀번호가 아닙니다.</small>
+      <label class="check" style="margin-top:10px;">
+        <input type="checkbox" id="internalLinks" />
+        <span>글 생성 시 내 기존 글로 <b>내부링크 자동 연결</b> (워드프레스 연동 필요)</span>
+      </label>
+      <label class="field" style="margin-top:10px;">
+        <span>링크 버튼 처리 방식</span>
+        <select id="linkMode">
+          <option value="search">검색결과로 연결 (안전 · 추천)</option>
+          <option value="model">AI가 만든 URL 사용 (부정확할 수 있음)</option>
+        </select>
+        <small>AI는 실제 URL을 몰라 가짜 링크를 만들 수 있어, 기본은 관련 '네이버 검색결과'로 새 창 연결합니다.</small>
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>💰 애드센스 광고 자동 삽입</h2>
+      <label class="check">
+        <input type="checkbox" id="adEnabled" />
+        <span>본문 중간에 광고 자동 삽입 (도입부 뒤 · 중간 · FAQ 앞)</span>
+      </label>
+      <label class="field" style="margin-top:10px;">
+        <span>광고 유닛 HTML 코드</span>
+        <textarea id="adCode" rows="4" placeholder="애드센스 광고 유닛 코드를 붙여넣으세요 (자동광고 사용 시 비워두어도 됨)"></textarea>
+        <small>애드센스 > 광고 > 광고 단위별 에서 생성한 코드. 자동광고를 쓰면 이 기능은 꺼도 됩니다.</small>
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>☁️ 저장소 연동 (작업 기록·내 글 보관함)</h2>
+      <label class="field">
+        <span>저장 API URL (내 서버 또는 구글 시트)</span>
+        <input type="text" id="sheetApiUrl" placeholder="https://내서버.com/save.php  또는  https://script.google.com/macros/s/..../exec" />
+        <small><b>내 서버(쉬움)</b>: <b>설정_내서버연동.md</b>의 save.php를 서버에 올리고 그 주소 입력. /
+          <b>구글 시트</b>: 설정_구글시트연동.md 참고. 비우면 로컬에만 저장.</small>
+      </label>
+      <label class="field">
+        <span>비밀 토큰 (선택)</span>
+        <input type="password" id="sheetToken" placeholder="Apps Script에 설정한 토큰과 동일하게(선택)" />
+      </label>
+      <label class="field">
+        <span>구글 시트 보기 URL (선택 · '📄 시트 열기' 버튼용)</span>
+        <input type="text" id="sheetViewUrl" placeholder="https://docs.google.com/spreadsheets/d/..../edit" />
+        <small>연동한 그 시트의 주소. 넣으면 사이드패널에서 전체 목록을 바로 열 수 있어요.</small>
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>📈 네이버 데이터랩 (트렌드 분석)</h2>
+      <div class="grid2">
+        <label class="field">
+          <span>Client ID</span>
+          <input type="text" id="naverClientId" placeholder="네이버 개발자센터" />
+        </label>
+        <label class="field">
+          <span>Client Secret</span>
+          <input type="password" id="naverClientSecret" placeholder="" />
+        </label>
+      </div>
+      <small>발급: <a href="https://developers.naver.com/apps/" target="_blank">네이버 개발자센터</a> → 애플리케이션 등록 → 데이터랩(검색어트렌드) 사용.</small>
+    </section>
+
+    <section class="card">
+      <h2>✍️ 글쓰기 기본값</h2>
+      <div class="grid2">
+        <label class="field">
+          <span>기본 플랫폼</span>
+          <select id="defaultPlatform">
+            <option value="wordpress">워드프레스</option>
+            <option value="blogger">블로거</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>기본 이미지 생성</span>
+          <select id="generateImages">
+            <option value="true">켬 (기본)</option>
+            <option value="false">끔 (텍스트만)</option>
+          </select>
+        </label>
+      </div>
+      <label class="field">
+        <span>기본 이미지 개수</span>
+        <select id="imageCount">
+          <option value="1">1 (썸네일만)</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4 (기본)</option>
+          <option value="5">5</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>내 블로그 주소 (우선 링크·네이버 유입 대상)</span>
+        <input type="text" id="myBlogUrl" placeholder="https://blog.example.com (내 블로거/워드프레스 주소)" />
+        <small>참고자료 링크를 걸 때 이 블로그의 관련 글을 먼저 찾아 우선 연결합니다.</small>
+      </label>
+      <label class="field">
+        <span>기본 톤</span>
+        <input type="text" id="defaultTone" />
+      </label>
+      <label class="field">
+        <span>기본 대상 독자</span>
+        <input type="text" id="defaultAudience" />
+      </label>
+      <label class="field">
+        <span>저자 소개 (E-E-A-T · 글 하단 삽입, 선택)</span>
+        <textarea id="authorBio" rows="2" placeholder="예: 5년차 IT 블로거, 직접 사용해본 제품만 리뷰합니다."></textarea>
+      </label>
+    </section>
+
+    <div class="actions">
+      <button id="saveBtn" class="primary">저장</button>
+      <button id="testWpBtn" class="ghost">워드프레스 연결 테스트</button>
+      <span id="saved" class="saved hidden">✅ 저장됨</span>
+      <span id="testMsg" class="saved hidden"></span>
+    </div>
+  </div>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

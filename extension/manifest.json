@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "블로그 오토라이터 (AdSense)",
+  "version": "0.2.0",
+  "description": "클로드에서 쓴 원본을 3종(블로거/네이버/워드프레스)으로 재가공·디자인·썸네일·링크까지",
+  "permissions": [
+    "storage",
+    "sidePanel",
+    "clipboardWrite",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "블로그 오토라이터 열기"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/sidepanel.html"
+  },
+  "options_page": "options/options.html"
+}
