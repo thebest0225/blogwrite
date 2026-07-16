@@ -10,6 +10,27 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(express.json({ limit: "8mb" }));
+
+// ---- MangoHub SSO 인증 (세션 쿠키는 .mangois.love 공유) ----
+const MANGOHUB_VERIFY = process.env.MANGOHUB_VERIFY || "http://localhost:8000/api/auth/verify";
+const LOGIN_URL = process.env.LOGIN_URL || "https://mangois.love/";
+const PUBLIC_PATHS = new Set(["/styles.css", "/app.js", "/favicon.ico", "/health"]);
+async function isAuthed(req) {
+  const cookie = req.headers.cookie || "";
+  if (!/session_token=/.test(cookie)) return false;
+  try {
+    const r = await fetch(MANGOHUB_VERIFY, { headers: { Cookie: cookie, "X-Page-Key": "blogwrite" } });
+    return r.ok;
+  } catch { return false; }
+}
+app.get("/health", (req, res) => res.json({ ok: true }));
+app.use(async (req, res, next) => {
+  if (PUBLIC_PATHS.has(req.path) || req.path.startsWith("/lib/")) return next();
+  if (await isAuthed(req)) return next();
+  if (req.path.startsWith("/api/")) return res.status(401).json({ error: "MangoHub 로그인이 필요합니다.", login: LOGIN_URL });
+  return res.redirect(302, LOGIN_URL);
+});
+
 app.use(express.static(path.join(__dirname, "public")));
 
 const KIE = process.env.KIE_API_KEY;

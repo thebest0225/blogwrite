@@ -26,6 +26,11 @@ const DEFAULTS = {
 // ---------- API 헬퍼 ----------
 async function apiJson(url, opts) {
   const r = await fetch(url, opts);
+  if (r.status === 401) {
+    let j = {}; try { j = await r.json(); } catch {}
+    location.href = j.login || "https://mangois.love/";
+    throw new Error("MangoHub 로그인이 필요합니다.");
+  }
   const t = await r.text();
   let j; try { j = JSON.parse(t); } catch { throw new Error(t.slice(0, 200)); }
   if (!r.ok || j.error) throw new Error(j.error || `HTTP ${r.status}`);
