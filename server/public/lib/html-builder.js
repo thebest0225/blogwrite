@@ -78,6 +78,12 @@ function smartLink(label, cfg) {
   if (/뉴스|기사|속보|캐스팅|인터뷰/i.test(L)) return "https://search.naver.com/search.naver?where=news&query=" + enc(q);
   if (/쿠팡|구매|최저가|가격|주문|사기/i.test(L)) return "https://www.coupang.com/np/search?q=" + enc(q);
   if (/시청|다시보기|스트리밍|ott|방송|어디서|정주행|몰아보기|보기/i.test(L)) return cfg.searchBase + enc(q + " 다시보기");
+  // 특정 의도 없는 일반 링크 → 내 연관글(보관함)이 있으면 크로스링크로 순환 배정, 없으면 통합검색
+  if (cfg.relatedUrls && cfg.relatedUrls.length) {
+    const u = cfg.relatedUrls[cfg._i % cfg.relatedUrls.length];
+    cfg._i++;
+    if (u) return u;
+  }
   return cfg.searchBase + enc(q); // 기본: 네이버 통합검색(제목)
 }
 
@@ -226,6 +232,20 @@ export function buildHtml(article, opts = {}) {
 
   if (article.authorBio) {
     parts.push(`<div style="${S.calloutBase}${S.callout.info}"><strong>작성자</strong><br/>${inline(article.authorBio)}</div>`);
+  }
+
+  // 함께 보면 좋은 글 (내 보관함 연관글 → 내부 유입/상호링크)
+  if (opts.relatedPosts && opts.relatedPosts.length) {
+    const items = opts.relatedPosts
+      .filter((p) => p && p.link)
+      .slice(0, 5)
+      .map((p) => `<a href="${esc(p.link)}" target="_blank" rel="noopener" style="text-decoration:none;display:block;">`
+        + `<div class="awb-row" style="display:flex;align-items:center;gap:10px;border:1px solid #eee;border-radius:12px;padding:11px 14px;margin:7px 0;background:#fff;">`
+        + `<div style="width:34px;height:34px;border-radius:9px;background:${accent}1a;display:flex;align-items:center;justify-content:center;font-size:16px;flex:none;">📄</div>`
+        + `<div style="flex:1;min-width:0;font-weight:600;color:#111;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.title || p.link)}</div>`
+        + `<div class="awb-btn" style="background:${accent};color:#fff;border-radius:999px;padding:6px 13px;font-weight:700;font-size:.82em;white-space:nowrap;">보러가기 →</div>`
+        + `</div></a>`).join("");
+    if (items) parts.push(`<div style="margin-top:1.6em;"><h2 style="${S.h2}">함께 보면 좋은 글</h2>${items}</div>`);
   }
 
   if (opts.sources && opts.sources.length) {

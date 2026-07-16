@@ -9,6 +9,7 @@ let settings = null;
 let config = { kieEnabled: false, wpEnabled: false, naverEnabled: false };
 let mode = "blogger";
 let lastArticle = null, lastHtml = null, lastKeyword = "", lastResolvedType = "", lastRelatedItems = [];
+let lastMyPosts = [], lastSources = [];
 
 const ASPECT_BY_MODE = { blogger: "4:3", wp: "4:3", naver: "1:1" };
 
@@ -227,15 +228,21 @@ async function saveMyPost(entry) {
 
 // ---------- 링크 소스 ----------
 async function gatherRelatedLinks(keyword) {
-  const embedded = extractLinksFromText($("originalText").value || "");
+  // 내 보관함 연관글(크로스링크·함께보면좋은글) + 내 블로그 검색
   const storeMatches = matchMyPosts(await getAllMyPosts(), keyword);
   let mine = [];
   if (settings.myBlogUrl && keyword) { try { mine = await searchMyBlog(settings.myBlogUrl, keyword); } catch {} }
-  const merged = [], seen = new Set();
-  for (const it of [...storeMatches, ...mine, ...embedded]) {
-    if (it?.link && !seen.has(it.link)) { seen.add(it.link); merged.push(it); }
+  const myPosts = [], seenM = new Set();
+  for (const it of [...storeMatches, ...mine]) {
+    if (it?.link && !seenM.has(it.link)) { seenM.add(it.link); myPosts.push(it); }
   }
-  lastRelatedItems = merged.slice(0, 10);
+  lastMyPosts = myPosts.slice(0, 8);
+  // 원본 글에 이미 있던 링크 → 참고자료(출처)
+  const embedded = extractLinksFromText($("originalText").value || "");
+  const src = [], seenS = new Set();
+  for (const it of embedded) { if (it?.link && !seenS.has(it.link)) { seenS.add(it.link); src.push(it); } }
+  lastSources = src.slice(0, 8);
+  lastRelatedItems = [...lastMyPosts, ...lastSources]; // 하위호환
 }
 function extractLinksFromText(text) {
   const out = [];
@@ -416,15 +423,18 @@ async function finalizeArticle(article, keyword, resolvedType) {
 }
 
 function rebuildPreview() {
-  let sourceItems = lastRelatedItems.slice(0, 6);
-  let relatedUrls = lastRelatedItems.map((x) => x.link);
+  const isNaver = mode === "naver";
+  // 네이버: 크로스링크·연관글·출처 모두 제외(외부링크 1개 원칙). WP/블로거: 연관글 삽입.
+  const myPosts = isNaver ? [] : lastMyPosts;
   const out = buildHtml(lastArticle, {
     adEnabled: settings.adEnabled, adCode: settings.adCode,
     accent: settings.overlayAccent || "#e11d48",
     searchLinks: settings.linkMode !== "model",
     searchContext: lastKeyword || lastArticle?.title || "",
-    relatedUrls, sources: sourceItems,
-    selfUrl: (mode === "naver" || mode === "wp") ? ($("bloggerUrl").value.trim() || settings.myBlogUrl || "") : ""
+    relatedUrls: myPosts.map((x) => x.link),   // 일반 링크 → 내 연관글로 크로스링크
+    relatedPosts: myPosts,                      // "함께 보면 좋은 글" 섹션
+    sources: isNaver ? [] : lastSources,        // 참고자료(원본 내장 링크)
+    selfUrl: (mode === "naver" || mode === "wp") ? getDestUrl() : ""
   });
   lastHtml = out.html;
   $("metaLine").textContent = `제목: ${lastArticle.title}` + (lastResolvedType ? ` · 유형: ${lastResolvedType}` : "") + `\n메타: ${lastArticle.metaDescription || "-"}`;
