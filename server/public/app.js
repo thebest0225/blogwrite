@@ -100,6 +100,17 @@ function setStatus(msg, isError = false) {
 }
 function clearStatus() { $("status").classList.add("hidden"); }
 function todayStr() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+// 원본 글에서 주제(첫 제목/문장) 자동 추출 — 별도 키워드 입력 대체
+function deriveTopic() {
+  const src = $("originalText").value || "";
+  const first = src.split(/\n/).map((s) => s.replace(/^#+\s*/, "").replace(/[*_`>#]/g, "").trim()).find((s) => s.length > 1) || "";
+  return first.slice(0, 40);
+}
+// 쿠션이 유입시킬 목적지(메인) URL: 입력칸 > 설정 내블로그 > 최근 저장한 내 글
+function getDestUrl() {
+  return ($("bloggerUrl")?.value?.trim()) || settings.myBlogUrl || (lastMainUrl || "");
+}
+let lastMainUrl = "";
 
 function parseJson(raw) {
   let t = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
@@ -153,7 +164,7 @@ async function renderTrends(force) {
     const row = document.createElement("div"); row.className = "hist-item";
     const b = document.createElement("button"); b.className = "hist-load";
     b.textContent = `${i + 1}. ${it.title}`;
-    b.addEventListener("click", () => { $("keyword").value = it.title; setStatus(`주제로 "${it.title}" 선택됨`); });
+    b.addEventListener("click", async () => { try { await navigator.clipboard.writeText(it.title); } catch {} setStatus(`"${it.title}" 복사됨 — 이 주제로 원본 글을 작성해 붙여넣으세요.`); });
     row.appendChild(b); box.appendChild(row);
   });
 }
@@ -210,6 +221,7 @@ async function onAddMyPost() {
 }
 async function saveMyPost(entry) {
   await storeAdd({ type: "post", title: entry.title, url: entry.url, keyword: entry.keyword || "" });
+  lastMainUrl = entry.url;   // 최근 저장한 내 글 → 쿠션 기본 목적지
   await renderMyPosts();
 }
 
@@ -264,12 +276,10 @@ async function buildCurrentPrompt(keyword) {
   if (mode === "blogger") {
     return buildBloggerMain({ ...common, sourceText, internalLinks: [] });
   }
-  let relatedKeywords = [];
-  const seed = keyword || (sourceText.split(/\n/)[0] || "").slice(0, 20);
-  if (seed) { try { relatedKeywords = (await apiKeywords(seed)).slice(0, 15); } catch {} }
+  // 파생 키워드는 모델이 스스로 도출(프롬프트에 지시). 외부 키워드 API 의존 제거.
   return buildCushionPrompt(mode === "wp" ? "wp" : "naver", {
-    ...common, sourceText, relatedKeywords,
-    bloggerUrl: $("bloggerUrl").value.trim() || settings.myBlogUrl || ""
+    ...common, sourceText,
+    bloggerUrl: getDestUrl()
   });
 }
 
@@ -277,8 +287,8 @@ async function buildCurrentPrompt(keyword) {
 async function onGenerate() {
   settings = await getSettings();
   if (!config.kieEnabled) { setStatus("서버에 KIE API 키가 설정되지 않았습니다. (.env 확인)", true); return; }
-  const keyword = $("keyword").value.trim();
   if (!$("originalText").value.trim()) { setStatus("원본 글을 붙여넣으세요. (claude.ai 등에서 작성한 글)", true); return; }
+  const keyword = deriveTopic();   // 원본에서 주제 자동 추출 (별도 키워드 입력 없음)
 
   const btn = $("generateBtn"); btn.disabled = true; $("result").classList.add("hidden");
   try {
@@ -337,6 +347,7 @@ function safeResolution(aspect) {
   return res;
 }
 
+// 워드프레스 하이브리드: 상단 클릭 유도 링크카드(2~3개) 보장
 function ensureTopLinkcard(article, keyword) {
   const blocks = article.blocks || [];
   if (blocks.slice(0, 4).some((b) => b.type === "linkcard")) return;
@@ -345,8 +356,7 @@ function ensureTopLinkcard(article, keyword) {
     type: "linkcard", heading: "👉 먼저 확인하세요",
     items: [
       { icon: "▶️", title: `${kw} 전체 내용 자세히 보기`, subtitle: "핵심 정리·자세한 정보", label: "자세히 보기 →", featured: true },
-      { icon: "📺", title: `${kw} 다시보기·시청 정보`, subtitle: "어디서 보는지 확인", label: "다시보기 →" },
-      { icon: "👥", title: `${kw} 등장인물·출연진`, subtitle: "총정리", label: "총정리 →" }
+      { icon: "📌", title: `${kw} 관련 정보 총정리`, subtitle: "한눈에 보기", label: "총정리 →" }
     ]
   };
   let idx = blocks.findIndex((b) => b.type === "image" && b.slot === "thumbnail");
@@ -355,10 +365,21 @@ function ensureTopLinkcard(article, keyword) {
   article.blocks = blocks;
 }
 
+// 네이버: 외부 링크는 딱 1개(자세히 보기 → 목적지)만 남김
+function enforceNaverSingleLink(article, keyword) {
+  const blocks = article.blocks || [];
+  // 기존 linkcard/cta 전부 제거 (네이버는 외부링크 불이익)
+  const stripped = blocks.filter((b) => b.type !== "linkcard" && b.type !== "cta");
+  // 마지막에 단일 유입 CTA 하나만 추가
+  stripped.push({ type: "cta", label: `${(keyword || article.title || "").trim()} 전체 내용 자세히 보기 →`, url: "#" });
+  article.blocks = stripped;
+}
+
 async function finalizeArticle(article, keyword, resolvedType) {
   article.today = todayStr();
   article.authorBio = settings.authorBio;
-  if (mode === "naver" || mode === "wp") ensureTopLinkcard(article, keyword);
+  if (mode === "wp") ensureTopLinkcard(article, keyword);
+  else if (mode === "naver") enforceNaverSingleLink(article, keyword);
   enforceImageCount(article, parseInt($("imgCount").value, 10) || 1);
   lastArticle = article; lastKeyword = keyword || ""; lastResolvedType = resolvedType || "";
 
@@ -376,8 +397,12 @@ async function finalizeArticle(article, keyword, resolvedType) {
   $("result").classList.remove("hidden");
   $("wpActions").classList.toggle("hidden", !(mode === "wp" && config.wpEnabled));
   renderImageEditors();
-  if (mode === "blogger") $("myPostTitle").value = article.title || "";
-  clearStatus();
+  if (mode === "blogger") {
+    $("myPostTitle").value = article.title || "";
+    setStatus("✅ 블로거 메인 완성. 발행 후 그 URL을 아래 '내 글 보관함'에 저장하면, 네이버·워드프레스 쿠션이 이 글로 자동 유입됩니다.");
+  } else {
+    clearStatus();
+  }
 
   try {
     const plainBody = (lastHtml || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 4000);
