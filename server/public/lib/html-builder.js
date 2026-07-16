@@ -18,6 +18,21 @@ function inline(s = "") {
   return t;
 }
 
+// 유튜브 영상 ID 추출 (watch?v= / youtu.be / embed / shorts / live)
+function ytId(u) {
+  if (!u) return "";
+  const m = String(u).match(/(?:youtube\.com\/(?:watch\?[^#\s"']*\bv=|embed\/|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : "";
+}
+// 반응형 유튜브 임베드(재생 플레이어)
+function ytEmbed(id, title) {
+  return `<div style="position:relative;width:100%;aspect-ratio:16/9;margin:1.5em 0;border-radius:12px;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,.15);background:#000;">`
+    + `<iframe src="https://www.youtube.com/embed/${id}" title="${esc(title || "YouTube 영상")}" `
+    + `style="position:absolute;inset:0;width:100%;height:100%;border:0;" loading="lazy" `
+    + `allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div>`
+    + (title ? `<p style="text-align:center;color:#888;font-size:.85em;margin:-6px 0 1em;">${esc(title)}</p>` : "");
+}
+
 const S = {
   h2: "font-size:1.5em;font-weight:700;margin:1.6em 0 0.6em;padding-bottom:0.2em;border-bottom:2px solid #eee;",
   h3: "font-size:1.2em;font-weight:700;margin:1.2em 0 0.5em;",
@@ -114,8 +129,15 @@ function renderBlock(b, cfg) {
       const style = S.callout[b.style] || S.callout.info;
       return `<div style="${S.calloutBase}${style}">${inline(b.text)}</div>`;
     }
+    case "youtube": {
+      const id = ytId(b.url || b.videoUrl || b.id);
+      return id ? ytEmbed(id, b.title || b.label || "") : "";
+    }
     case "cta": {
       const url = resolveHref(b.url, b.label, cfg);
+      // 유튜브 영상 URL이면 버튼 대신 재생 플레이어로 임베드
+      const yid = ytId(url) || ytId(b.url);
+      if (yid) return ytEmbed(yid, b.label || "");
       const cta = `display:inline-block;background:${accent};color:#fff;padding:13px 28px;border-radius:10px;font-weight:700;text-decoration:none;box-shadow:0 3px 10px rgba(0,0,0,.18);`;
       return `<div style="text-align:center;margin:1.4em 0;"><a class="awb-cta" href="${esc(url)}" target="_blank" rel="noopener" style="${cta}">${esc(b.label || "자세히 보기")}</a></div>`;
     }

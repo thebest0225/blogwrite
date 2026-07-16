@@ -75,6 +75,8 @@ async function kieChat({ system, user, maxTokens, temperature, model, prefillJso
   const data = j.data && (j.data.content || j.data.choices) ? j.data : j;
   let content = Array.isArray(data.content) ? data.content.filter((b) => b.type === "text").map((b) => b.text).join("") : "";
   if (!content) content = data?.choices?.[0]?.message?.content || "";
+  // 게이트웨이 에러 HTML이 정상 JSON의 content 안에 담겨오는 경우도 실패로 처리 → 재시도
+  if (/^\s*<(?:!doctype|html)|no-js ie6 oldie/i.test(content)) throw new Error("KIE 게이트웨이 오류(본문 HTML)");
   if (prefillJson && content) { content = content.replace(/^\s*/, ""); if (!content.startsWith("{")) content = "{" + content; }
   return content;
 }
@@ -94,15 +96,21 @@ app.post("/api/chat", async (req, res) => {
 });
 
 // ---- 이미지 (KIE jobs) ----
+// 게이트웨이 HTML/비정상 응답 방어 후 JSON 파싱
+async function kieSafeJson(r) {
+  const t = await r.text();
+  if (!r.ok || /^\s*<(?:!doctype|html)|no-js ie6 oldie/i.test(t)) throw new Error(`KIE 게이트웨이 오류(${r.status})`);
+  try { return JSON.parse(t); } catch { throw new Error("KIE 응답 형식 오류"); }
+}
 async function runImageJob(model, input) {
   const g = await fetch(`${KIE_BASE}/api/v1/jobs/createTask`, { method: "POST", headers: kieHeaders(), body: JSON.stringify({ model, input }) });
-  const gj = await g.json();
+  const gj = await kieSafeJson(g);
   if (gj.code !== 200) throw new Error(gj.msg || "createTask 실패");
   const id = gj.data.taskId;
   for (let i = 0; i < 90; i++) {
     await sleep(2000);
     const inf = await fetch(`${KIE_BASE}/api/v1/jobs/recordInfo?taskId=${encodeURIComponent(id)}`, { headers: kieHeaders() });
-    const d = (await inf.json()).data;
+    let d; try { d = (await kieSafeJson(inf)).data; } catch { continue; }
     if (!d) continue;
     if (d.state === "success") { let u = []; try { u = JSON.parse(d.resultJson || "{}").resultUrls || []; } catch {} if (u[0]) return u[0]; throw new Error("결과 URL 없음"); }
     if (d.state === "fail") throw new Error(d.failMsg || "이미지 실패");

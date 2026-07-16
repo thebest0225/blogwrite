@@ -301,6 +301,24 @@ function ensureTopLinkcard(target, article, keyword, relatedPosts, destUrl) {
   let idx = blocks.findIndex((b) => b.type === "image" && b.slot === "thumbnail"); idx = idx >= 0 ? idx + 1 : 0;
   blocks.splice(idx, 0, card); article.blocks = blocks;
 }
+// 유튜브 영상 ID 추출
+function ytId(u) { const m = String(u || "").match(/(?:youtube\.com\/(?:watch\?[^#\s"'()]*\bv=|embed\/|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/); return m ? m[1] : ""; }
+// 유튜브 URL을 재생 플레이어(youtube 블록)로 변환/삽입 (블로거·WP용, 네이버 제외)
+function embedYouTube(article) {
+  const blocks = article.blocks || []; const out = []; const seen = new Set();
+  for (const b of blocks) {
+    if (b.type === "cta" && ytId(b.url)) { const id = ytId(b.url); if (!seen.has(id)) { seen.add(id); out.push({ type: "youtube", url: b.url, title: b.label || "" }); } continue; }
+    out.push(b);
+    let hay = "";
+    if (b.type === "paragraph") hay = b.text || "";
+    else if (b.type === "linkcard") hay = (b.items || []).map((it) => it.url || "").join(" ");
+    if (hay) {
+      const re = /(?:youtube\.com\/(?:watch\?[^#\s"'()]*\bv=|embed\/|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/g;
+      let mm; while ((mm = re.exec(hay))) { if (!seen.has(mm[1])) { seen.add(mm[1]); out.push({ type: "youtube", url: mm[0], title: "관련 영상" }); } }
+    }
+  }
+  article.blocks = out;
+}
 // 네이버: 외부 링크 딱 1개(자세히 보기 → 목적지)
 function enforceNaverSingleLink(article, keyword) {
   const blocks = (article.blocks || []).filter((b) => b.type !== "linkcard" && b.type !== "cta");
@@ -313,6 +331,7 @@ async function finalizeArticle(target, article, keyword, resolvedType) {
   if (target === "wp") ensureTopLinkcard("wp", article, keyword, lastMyPosts, getDestUrl());
   else if (target === "naver") enforceNaverSingleLink(article, keyword);
   else if (target === "blogger" && lastMyPosts.length) ensureTopLinkcard("blogger", article, keyword, lastMyPosts, "");
+  if (target !== "naver") embedYouTube(article);   // 유튜브 URL → 재생 플레이어 임베드(네이버는 iframe 불가 → 제외)
   enforceImageCount(article, parseInt($("imgCount").value, 10) || 1);
 
   if ($("genImages").checked && config.kieEnabled) {
@@ -391,8 +410,9 @@ function refreshAfterEdit() {
   $("preview").srcdoc = buildPreviewDoc(r.article.title, r.html);
   renderEditor();
 }
-const ED_TYPE = { paragraph: "문단", heading: "제목", list: "리스트", table: "표", callout: "박스", cta: "버튼", linkcard: "링크카드", image: "이미지" };
+const ED_TYPE = { paragraph: "문단", heading: "제목", list: "리스트", table: "표", callout: "박스", cta: "버튼", linkcard: "링크카드", image: "이미지", youtube: "영상" };
 function edSummary(b) {
+  if (b.type === "youtube") return `[영상] ${b.title || ""} (${ytId(b.url) || "?"})`;
   if (b.type === "cta") return `[버튼] ${b.label || ""} → ${b.url || "#"}`;
   if (b.type === "image") return `[이미지] ${b.alt || b.prompt || ""}${b.resolvedUrl ? " (생성됨)" : ""}`;
   if (b.type === "linkcard") return `[링크카드] ${(b.items || []).map((x) => x.title).join(", ")}`;
@@ -417,6 +437,7 @@ function insertBar(index) {
   bar.appendChild(mk("+ 글", addTextAt));
   bar.appendChild(mk("+ 버튼", addButtonAt));
   bar.appendChild(mk("+ 이미지", addImageAt));
+  bar.appendChild(mk("+ 영상", addVideoAt));
   return bar;
 }
 function blockRow(b, i) {
@@ -448,6 +469,18 @@ function addButtonAt(index, bar) {
   });
   form.appendChild(label); form.appendChild(url); form.appendChild(ok);
   bar.replaceWith(form); label.focus();
+}
+function addVideoAt(index, bar) {
+  const form = document.createElement("div"); form.className = "ed-form";
+  const url = document.createElement("input"); url.placeholder = "유튜브 영상 주소 (youtube.com/watch?v=... 또는 youtu.be/...)";
+  const ok = document.createElement("button"); ok.className = "mini primary-mini"; ok.textContent = "삽입";
+  ok.addEventListener("click", () => {
+    const id = ytId(url.value.trim());
+    if (!id) { setStatus("유효한 유튜브 영상 주소가 아닙니다.", true); return; }
+    results[activeTarget].article.blocks.splice(index, 0, { type: "youtube", url: url.value.trim(), title: "" });
+    refreshAfterEdit();
+  });
+  form.appendChild(url); form.appendChild(ok); bar.replaceWith(form); url.focus();
 }
 async function addImageAt(index, bar) {
   const form = document.createElement("div"); form.className = "ed-form";
