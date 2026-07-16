@@ -126,7 +126,13 @@
     <form method="dialog" class="optform" id="optForm">
       <h3>설정</h3>
       <p class="muted">API 키는 서버 <code>.env</code> 에서 관리됩니다. 여기서는 비민감 값만 저장됩니다.</p>
-      <label class="field"><span>글 생성 모델</span>
+      <label class="field"><span>글 생성 엔진</span>
+        <select id="optEngine">
+          <option value="claude">Claude API (웹서치 O · 링크 정확 · 권장)</option>
+          <option value="kie">KIE (웹서치 X · 저렴)</option>
+        </select>
+      </label>
+      <label class="field"><span>글 생성 모델 (KIE 엔진일 때)</span>
         <select id="optChatModel">
           <option value="claude-sonnet-5">Claude Sonnet 5 (기본·빠름)</option>
           <option value="claude-opus-4-8">Claude Opus 4.8 (고품질·느림)</option>

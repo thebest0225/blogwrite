@@ -17,7 +17,7 @@ const DEFAULT_THUMB_STYLE =
 `Korean YouTube-style clickbait thumbnail, 16:9 aspect ratio. Cinematic, high-contrast dramatic lighting with a moody atmospheric background that fits the article's actual topic. Big HEAVY bold Korean sans-serif headline with a thick black-and-white outline, placed in the TOP area with the bottom third kept clear; the Korean text must be large and PERFECTLY spelled. Clean, premium, readable at small size. NO cartoon mascots, stock graphs, arrows, flags, finance elements. Imagery matches the real subject.`;
 
 const DEFAULTS = {
-  kieChatModel: "claude-sonnet-5", imageResolution: "1K",
+  genEngine: "claude", kieChatModel: "claude-sonnet-5", imageResolution: "1K",
   thumbnailMode: "ai_full", thumbnailStylePrompt: "", overlayAccent: "#ff2d55",
   linkMode: "search", myBlogUrl: "", defaultTone: "친근하고 신뢰감 있는",
   defaultAudience: "관련 정보를 처음 찾아보는 일반 독자", authorBio: "",
@@ -34,7 +34,7 @@ async function apiJson(url, opts) {
   return j;
 }
 const chatComplete = ({ system, user, maxTokens, model }) =>
-  apiJson("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system, user, maxTokens, model }) }).then((j) => j.content);
+  apiJson("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system, user, maxTokens, model, engine: settings?.genEngine }) }).then((j) => j.content);
 const generateImage = ({ prompt, aspectRatio, resolution }) =>
   apiJson("/api/image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, aspect: aspectRatio, resolution }) }).then((j) => j.url);
 const editImage = ({ imageUrl, prompt, aspectRatio, resolution }) =>
@@ -130,6 +130,7 @@ function tryParse(raw) { try { return parseJson(raw); } catch { return null; } }
 
 // ---------- 설정 모달 ----------
 function openOptions() {
+  $("optEngine").value = settings.genEngine || "claude";
   $("optChatModel").value = settings.kieChatModel || "claude-sonnet-5";
   $("optThumbMode").value = settings.thumbnailMode || "ai_full";
   $("optImgRes").value = settings.imageResolution || "1K";
@@ -146,6 +147,7 @@ function openOptions() {
 }
 async function onSaveOptions() {
   const patch = {
+    genEngine: $("optEngine").value,
     kieChatModel: $("optChatModel").value, thumbnailMode: $("optThumbMode").value, imageResolution: $("optImgRes").value,
     linkMode: $("optLinkMode").value, overlayAccent: $("optAccent").value, myBlogUrl: $("optMyBlog").value.trim(),
     defaultTone: $("optTone").value.trim(), defaultAudience: $("optAudience").value.trim(), authorBio: $("optAuthorBio").value.trim(),

@@ -50,6 +50,10 @@ const IMAGE_MODEL = process.env.KIE_IMAGE_MODEL || "gpt-image-2-text-to-image";
 const NAVER_ID = process.env.NAVER_CLIENT_ID, NAVER_SECRET = process.env.NAVER_CLIENT_SECRET;
 const WP_SITE = process.env.WP_SITE, WP_USER = process.env.WP_USER, WP_PASS = process.env.WP_APP_PASSWORD;
 const KIE_BASE = "https://api.kie.ai";
+// Claude 공식 API (웹서치 지원) — 글 생성용
+const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
+const DEFAULT_ENGINE = process.env.GEN_ENGINE || (ANTHROPIC_KEY ? "claude" : "kie");
 const STORE = path.join(__dirname, "records.json");
 const DRAFTS = path.join(__dirname, "drafts.json");   // MCP로 받은 초안함 (MCP 서버와 공유)
 
@@ -83,16 +87,40 @@ async function kieChat({ system, user, maxTokens, temperature, model, prefillJso
   if (prefillJson && content) { content = content.replace(/^\s*/, ""); if (!content.startsWith("{")) content = "{" + content; }
   return content;
 }
+// ---- 글 생성 (Claude 공식 API, 웹서치 O) ----
+async function anthropicChat({ system, user, maxTokens = 16000, model, webSearch = true }) {
+  const body = { model: model || ANTHROPIC_MODEL, max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] };
+  if (webSearch) body.tools = [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }];
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const t = await r.text();
+  if (!r.ok) throw new Error(`Anthropic ${r.status}: ${t.slice(0, 180)}`);
+  let j; try { j = JSON.parse(t); } catch { throw new Error("Anthropic 응답 형식 오류"); }
+  const content = (j.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+  if (!content.trim()) throw new Error("Anthropic 빈 응답");
+  return content;
+}
+
 app.post("/api/chat", async (req, res) => {
-  const { system, user, maxTokens = 16000, temperature = 0.8, model, prefillJson = true } = req.body;
+  const { system, user, maxTokens = 16000, temperature = 0.8, model, prefillJson = true, engine } = req.body;
+  const useClaude = (engine === "claude" || (!engine && DEFAULT_ENGINE === "claude")) && !!ANTHROPIC_KEY;
   let content = "", lastErr = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt) await sleep(1200);
     try {
-      content = await kieChat({ system, user, maxTokens, temperature, model, prefillJson });
+      content = useClaude
+        ? await anthropicChat({ system, user, maxTokens, webSearch: true })
+        : await kieChat({ system, user, maxTokens, temperature, model, prefillJson });
       if (content && content.trim()) break;
       lastErr = new Error("빈 응답");
-    } catch (e) { lastErr = e; }
+    } catch (e) {
+      lastErr = e;
+      // Claude 실패 시 KIE로 폴백(마지막 시도)
+      if (useClaude && attempt === 1) { try { content = await kieChat({ system, user, maxTokens, temperature, model, prefillJson }); if (content && content.trim()) break; } catch (e2) { lastErr = e2; } }
+    }
   }
   if (content && content.trim()) return res.json({ content });
   res.status(502).json({ error: "AI 응답 실패(잠시 후 다시 시도해 주세요). " + (lastErr ? String(lastErr.message || lastErr).slice(0, 120) : "") });
@@ -229,6 +257,7 @@ app.post("/api/drafts/status", (req, res) => {
 // ---- 비민감 설정 저장 (settings.json) ----
 const SETTINGS = path.join(__dirname, "settings.json");
 const SETTINGS_DEFAULTS = {
+  genEngine: "claude",          // claude(웹서치) | kie
   kieChatModel: "claude-sonnet-5",
   imageResolution: "1K",
   thumbnailMode: "ai_full",     // ai_full | overlay | off
@@ -254,7 +283,7 @@ app.post("/api/settings", (req, res) => {
 });
 
 // (선택) 비밀 설정이 아닌 프론트용 기본값 제공
-app.get("/api/config", (req, res) => res.json({ kieEnabled: !!KIE, wpEnabled: !!WP_SITE, naverEnabled: !!NAVER_ID }));
+app.get("/api/config", (req, res) => res.json({ kieEnabled: !!KIE, wpEnabled: !!WP_SITE, naverEnabled: !!NAVER_ID, claudeEnabled: !!ANTHROPIC_KEY, defaultEngine: DEFAULT_ENGINE }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`블로그 오토라이터 서버: http://localhost:${PORT}`));
