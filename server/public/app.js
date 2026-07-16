@@ -331,13 +331,24 @@ function rebuildPreview(target) {
   const r = results[target]; if (!r) return;
   const isNaver = target === "naver";
   const myPosts = isNaver ? [] : lastMyPosts;
-  const out = buildHtml(r.article, {
-    adEnabled: settings.adEnabled, adCode: settings.adCode, accent: settings.overlayAccent || "#e11d48",
-    searchLinks: settings.linkMode !== "model", searchContext: r.keyword || r.article?.title || "",
-    relatedUrls: myPosts.map((x) => x.link), relatedPosts: myPosts, sources: isNaver ? [] : lastSources,
-    selfUrl: (target === "naver" || target === "wp") ? getDestUrl() : ""
-  });
-  r.html = out.html;
+  try {
+    const out = buildHtml(r.article, {
+      adEnabled: settings.adEnabled, adCode: settings.adCode, accent: settings.overlayAccent || "#e11d48",
+      searchLinks: settings.linkMode !== "model", searchContext: r.keyword || r.article?.title || "",
+      relatedUrls: myPosts.map((x) => x.link), relatedPosts: myPosts, sources: isNaver ? [] : lastSources,
+      selfUrl: (target === "naver" || target === "wp") ? getDestUrl() : ""
+    });
+    r.html = out.html;
+  } catch (e) {
+    console.error("preview build error:", e);
+    // 링크 라우팅 없이 최소 미리보기로 폴백(결과 유실 방지)
+    try {
+      const out = buildHtml(r.article, { accent: settings.overlayAccent || "#e11d48", searchLinks: false });
+      r.html = out.html;
+    } catch (e2) {
+      r.html = `<h1>${(r.article?.title || "").replace(/</g, "&lt;")}</h1><p>미리보기 조립 중 오류가 발생했습니다. HTML 복사는 가능합니다.</p>`;
+    }
+  }
 }
 
 // ---------- 결과 표시 ----------

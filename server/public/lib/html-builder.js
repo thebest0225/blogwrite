@@ -62,7 +62,8 @@ function resolveHref(url, label, cfg) {
 function smartLink(label, cfg) {
   const raw = String(label || "");
   const L = raw.toLowerCase();
-  const enc = encodeURIComponent;
+  // 안전 인코딩: 짝 없는 서로게이트(깨진 이모지 등)로 인한 "URI malformed" 방지
+  const enc = (s) => { try { return encodeURIComponent(s); } catch { return encodeURIComponent(String(s).replace(/[\uD800-\uDFFF]/g, "").trim() || "검색"); } };
   // 제목 추출: 플랫폼명 + 동작어(시청하기·정주행·보러가기 등)를 최대한 제거
   let t = raw
     .replace(/넷플릭스에서|넷플릭스|netflix|티빙에서|티빙|tving|웨이브에서|웨이브|wavve|디즈니플러스|디즈니\s*\+|디즈니|disney|왓챠|쿠팡플레이|유플러스|u\+|jtbc|tvn|sbs|kbs|mbc|유튜브에서|유튜브|youtube|나무위키|위키백과|위키|wiki|공식|홈페이지|사이트/gi, "")

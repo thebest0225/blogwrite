@@ -11,6 +11,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(express.json({ limit: "8mb" }));
 
+// oguonline.com 등 별도 도메인: MangoHub 세션 쿠키(.mangois.love) 공유 불가 →
+// 기본은 인증되는 write.mangois.love 로 연결(리다이렉트). (환경변수로 끌 수 있음)
+const ALIAS_REDIRECT = process.env.ALIAS_REDIRECT !== "0";
+const ALIAS_HOSTS = new Set(["oguonline.com", "www.oguonline.com"]);
+const CANONICAL = process.env.CANONICAL_URL || "https://write.mangois.love";
+app.use((req, res, next) => {
+  const host = (req.headers.host || "").split(":")[0].toLowerCase();
+  if (ALIAS_REDIRECT && ALIAS_HOSTS.has(host)) return res.redirect(302, CANONICAL + req.originalUrl);
+  next();
+});
+
 // ---- MangoHub SSO 인증 (세션 쿠키는 .mangois.love 공유) ----
 const MANGOHUB_VERIFY = process.env.MANGOHUB_VERIFY || "http://localhost:8000/api/auth/verify";
 const LOGIN_URL = process.env.LOGIN_URL || "https://mangois.love/";
