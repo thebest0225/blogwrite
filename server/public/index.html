@@ -25,8 +25,8 @@
 
       <div class="opt-grid">
         <label class="field">
-          <span>목적지(메인) URL <span class="muted">— 쿠션이 유입시킬 곳. 블로거 발행 후 저장하면 자동 세팅</span></span>
-          <input type="text" id="bloggerUrl" placeholder="https://내도메인.com/글주소 (비우면 최근 저장글·설정값 자동)" />
+          <span>목적지(워드프레스) URL <span class="muted">— 블로거·네이버 쿠션이 유입시킬 곳. WP 발행하면 자동 세팅</span></span>
+          <input type="text" id="bloggerUrl" placeholder="https://wp.mangois.love/글주소 (비우면 최근 발행글·설정값 자동)" />
         </label>
         <div class="imgrow">
           <label class="check"><input type="checkbox" id="genImages" /><span>이미지 생성</span></label>
@@ -68,11 +68,11 @@
     <!-- 2) 순차 생성 -->
     <section class="card">
       <div class="card-title">2. 순차 생성</div>
-      <p class="muted" style="margin:.2em 0 .8em;">권장 순서: ① 블로거 메인 생성 → 발행(직접 수정 후) → 발행 주소 저장 → ② 네이버 · ③ 워드프레스(그 주소로 자동 유입)</p>
+      <p class="muted" style="margin:.2em 0 .8em;">권장 순서: ① 워드프레스(목적지) 생성 → 발행 → 주소 저장(자동) → ② 블로거 · ③ 네이버 쿠션(그 주소로 자동 유입)</p>
       <div class="gen-btns">
-        <button class="genbtn" id="genBlogger"><b>① 블로거 메인</b><span>최종 목적지 · 가장 깊이</span></button>
-        <button class="genbtn" id="genNaver"><b>② 네이버</b><span>쿠션 · 친근체 · 링크 1개</span></button>
-        <button class="genbtn" id="genWp"><b>③ 워드프레스</b><span>하이브리드 · 쿠션+목적지</span></button>
+        <button class="genbtn" id="genWp"><b>① 워드프레스</b><span>최종 목적지 · 가장 깊이</span></button>
+        <button class="genbtn" id="genBlogger"><b>② 블로거</b><span>쿠션 · 링크 여러 개</span></button>
+        <button class="genbtn" id="genNaver"><b>③ 네이버</b><span>쿠션 · 목적지1+연관1</span></button>
       </div>
       <div id="status" class="status hidden" style="margin-top:10px;"></div>
     </section>
@@ -80,16 +80,16 @@
     <!-- 3) 결과 (탭으로 3종 확인) -->
     <section class="card" id="resultCard" style="display:none;">
       <div class="restabs">
-        <button class="restab" data-t="blogger" id="rt-blogger">블로거 메인</button>
-        <button class="restab" data-t="naver" id="rt-naver">네이버</button>
-        <button class="restab" data-t="wp" id="rt-wp">워드프레스</button>
+        <button class="restab" data-t="wp" id="rt-wp">워드프레스(목적지)</button>
+        <button class="restab" data-t="blogger" id="rt-blogger">블로거(쿠션)</button>
+        <button class="restab" data-t="naver" id="rt-naver">네이버(쿠션)</button>
       </div>
 
-      <!-- 블로거: 발행 URL 저장 -->
+      <!-- 워드프레스(목적지): 발행 URL 저장 -->
       <div class="mainurl-row hidden" id="mainUrlRow">
-        <span class="muted">발행하셨나요? 발행된 주소를 저장하면 네이버·워드프레스가 이 글로 유입됩니다 →</span>
-        <input type="text" id="mainUrlInput" placeholder="https://발행된-블로거-글-주소" />
-        <button class="mini primary-mini" id="mainUrlSave">발행주소 저장</button>
+        <span class="muted">발행된 워드프레스 주소를 저장하면 블로거·네이버 쿠션이 이 글로 유입됩니다 → (WP 발행 버튼 쓰면 자동)</span>
+        <input type="text" id="mainUrlInput" placeholder="https://wp.mangois.love/발행된-글-주소" />
+        <button class="mini primary-mini" id="mainUrlSave">목적지 주소 저장</button>
       </div>
 
       <div class="result-head">

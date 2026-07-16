@@ -182,16 +182,16 @@ async function saveMyPost(entry, content) {
   await storeAdd({ type: "post", title: entry.title, url: entry.url, keyword: entry.keyword || "", body: content || "" });
   lastMainUrl = entry.url; await renderMyPosts();
 }
-// 블로거 발행 주소 저장 → 목적지로 세팅
+// 워드프레스(목적지) 발행 주소 저장 → 쿠션 목적지로 세팅
 async function onSaveMainUrl() {
   const url = $("mainUrlInput").value.trim();
   if (!/^https?:\/\//.test(url)) { setStatus("발행된 주소(https://...)를 입력하세요.", true); return; }
-  const art = results.blogger?.article;
-  const plain = (results.blogger?.html || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 4000);
-  await saveMyPost({ title: art?.title || deriveTopic() || "메인 글", url, keyword: results.blogger?.keyword || deriveTopic() }, plain);
+  const art = results.wp?.article;
+  const plain = (results.wp?.html || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 4000);
+  await saveMyPost({ title: art?.title || deriveTopic() || "목적지 글", url, keyword: results.wp?.keyword || deriveTopic() }, plain);
   $("bloggerUrl").value = url;   // 쿠션 목적지로 자동 세팅
   $("mainUrlInput").value = "";
-  setStatus("✅ 발행 주소 저장 완료. 이제 네이버·워드프레스가 이 글로 유입됩니다.");
+  setStatus("✅ 목적지 주소 저장 완료. 이제 블로거·네이버 쿠션이 이 글로 유입됩니다.");
 }
 
 // ---------- 링크 소스 ----------
@@ -230,8 +230,8 @@ async function searchMyBlog(blogUrl, keyword) {
 function buildPromptFor(target, keyword) {
   const sourceText = $("originalText").value.trim();
   const common = { keyword, audience: settings.defaultAudience, tone: settings.defaultTone, authorBio: settings.authorBio, today: todayStr(), imageCount: parseInt($("imgCount").value, 10) || 1 };
-  if (target === "blogger") return buildBloggerMain({ ...common, sourceText, internalLinks: [] });
-  return buildCushionPrompt(target === "wp" ? "wp" : "naver", { ...common, sourceText, bloggerUrl: getDestUrl() });
+  if (target === "wp") return buildBloggerMain({ ...common, sourceText, internalLinks: [] });   // 워드프레스 = 최종 목적지
+  return buildCushionPrompt(target, { ...common, sourceText, bloggerUrl: getDestUrl() });         // blogger/naver = 쿠션
 }
 
 // ---------- 생성 ----------
@@ -279,27 +279,47 @@ async function genBlockImage(target, b, article, keyword) {
 }
 function safeResolution(aspect) { const res = settings.imageResolution || "1K"; const [aw, ah] = (aspect || "16:9").split(":").map(Number); if (aw === ah && res === "4K") return "2K"; return res; }
 
-// 상단 클릭 유도 링크카드: (쿠션) 목적지 자세히보기 + (공통) 내 블로그 연관글 바로가기
-// target: blogger|wp|naver, relatedPosts: [{title,link}], destUrl: 목적지
-function ensureTopLinkcard(target, article, keyword, relatedPosts, destUrl) {
+const ENTICERS = ["지금 바로 확인 →", "안 보면 손해 →", "여기서 확인 →", "놓치지 마세요 →"];
+function insertTopCard(article, card) {
+  const blocks = article.blocks || [];
+  let idx = blocks.findIndex((b) => b.type === "image" && b.slot === "thumbnail"); idx = idx >= 0 ? idx + 1 : 0;
+  blocks.splice(idx, 0, card); article.blocks = blocks;
+}
+// role: "destination"(워드프레스) | "cushion"(블로거). 상단 클릭 유도 링크카드.
+function ensureTopLinkcard(role, article, keyword, relatedPosts, destUrl) {
   const blocks = article.blocks || [];
   if (blocks.slice(0, 4).some((b) => b.type === "linkcard")) return;   // 모델이 이미 상단 카드 만들었으면 존중
   const kw = (keyword || article.title || "").trim();
   const items = [];
-  // 쿠션(wp): 목적지(원본)로 유입하는 featured 버튼
-  if (target !== "blogger" && destUrl) {
+  if (role === "cushion" && destUrl) {
     items.push({ icon: "▶️", title: `${kw} 전체 내용 자세히 보기`, subtitle: "핵심만 빠르게 확인", label: "자세히 보기 →", url: destUrl, featured: true });
   }
-  // 공통: 내 블로그 연관글을 '누르고 싶은' 바로가기로 (블로거 메인도 포함)
-  const enticers = ["지금 바로 확인 →", "안 보면 손해 →", "여기서 확인 →", "바로가기 →"];
   (relatedPosts || []).slice(0, 3).forEach((p, i) => {
-    items.push({ icon: "🔗", title: p.title, subtitle: "함께 보면 좋은 글", label: enticers[i] || "바로가기 →", url: p.link, featured: (target === "blogger" && i === 0 && !items.length) });
+    items.push({ icon: "🔗", title: p.title, subtitle: "함께 보면 좋은 글", label: ENTICERS[i] || "바로가기 →", url: p.link, featured: (role === "destination" && !items.length) });
   });
-  if (!items.length) return;   // 넣을 게 없으면(연관글 없고 목적지도 없음) 생략
-  const heading = target === "blogger" ? "👉 이 글과 함께 보면 좋아요" : "👉 먼저 확인하세요";
-  const card = { type: "linkcard", heading, items };
-  let idx = blocks.findIndex((b) => b.type === "image" && b.slot === "thumbnail"); idx = idx >= 0 ? idx + 1 : 0;
-  blocks.splice(idx, 0, card); article.blocks = blocks;
+  if (!items.length) return;
+  const heading = role === "destination" ? "👉 이 글과 함께 보면 좋아요" : "👉 먼저 확인하세요";
+  insertTopCard(article, { type: "linkcard", heading, items });
+}
+// 네이버 쿠션: 목적지 링크1 + 연관글1 (연관글 없으면 목적지 링크2). 공식출처는 모델이 본문에 넣음(유지).
+function ensureNaverFunnel(article, keyword, relatedPosts, destUrl) {
+  const blocks = article.blocks || [];
+  // 모델이 만든 '목적지 유입용' 카드/버튼(#·자세히보기류)은 제거하고 시스템이 통제한 1카드만. 단, 실제 외부 URL(공식출처)은 유지.
+  const selfish = /자세히|전체|더보기|더 알아|원문|본문|계속|모두\s*보|보러\s*가|바로가기|확인하러/;
+  article.blocks = blocks.filter((b) => {
+    if (b.type === "cta") { const u = b.url || ""; return /^https?:\/\//i.test(u) && !selfish.test(b.label || ""); }
+    if (b.type === "linkcard") return false; // 링크카드는 시스템 카드로 대체
+    return true;
+  });
+  const kw = (keyword || article.title || "").trim();
+  const dest = destUrl || "#";
+  const items = [{ icon: "▶️", title: `${kw} 전체 내용 자세히 보기`, subtitle: "핵심만 빠르게 확인", label: "지금 바로 확인 →", url: dest, featured: true }];
+  if (relatedPosts && relatedPosts[0]) {
+    items.push({ icon: "🔗", title: relatedPosts[0].title, subtitle: "함께 보면 좋은 글", label: "놓치지 마세요 →", url: relatedPosts[0].link });
+  } else {
+    items.push({ icon: "📌", title: `${kw} 더 자세히 알아보기`, subtitle: "관련 정보 총정리", label: "여기서 확인 →", url: dest });
+  }
+  insertTopCard(article, { type: "linkcard", heading: "👉 먼저 확인하세요", items });
 }
 // 유튜브 영상 ID 추출
 function ytId(u) { const m = String(u || "").match(/(?:youtube\.com\/(?:watch\?[^#\s"'()]*\bv=|embed\/|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/); return m ? m[1] : ""; }
@@ -319,18 +339,12 @@ function embedYouTube(article) {
   }
   article.blocks = out;
 }
-// 네이버: 외부 링크 딱 1개(자세히 보기 → 목적지)
-function enforceNaverSingleLink(article, keyword) {
-  const blocks = (article.blocks || []).filter((b) => b.type !== "linkcard" && b.type !== "cta");
-  blocks.push({ type: "cta", label: `${(keyword || article.title || "").trim()} 전체 내용 자세히 보기 →`, url: "#" });
-  article.blocks = blocks;
-}
 
 async function finalizeArticle(target, article, keyword, resolvedType) {
   article.today = todayStr(); article.authorBio = settings.authorBio;
-  if (target === "wp") ensureTopLinkcard("wp", article, keyword, lastMyPosts, getDestUrl());
-  else if (target === "naver") enforceNaverSingleLink(article, keyword);
-  else if (target === "blogger" && lastMyPosts.length) ensureTopLinkcard("blogger", article, keyword, lastMyPosts, "");
+  if (target === "wp") ensureTopLinkcard("destination", article, keyword, lastMyPosts, "");                 // 워드프레스 = 최종 목적지(연관글 상호링크)
+  else if (target === "blogger") ensureTopLinkcard("cushion", article, keyword, lastMyPosts, getDestUrl()); // 블로거 쿠션(다중 링크)
+  else if (target === "naver") ensureNaverFunnel(article, keyword, lastMyPosts, getDestUrl());              // 네이버 쿠션(목적지1+연관1)
   if (target !== "naver") embedYouTube(article);   // 유튜브 URL → 재생 플레이어 임베드(네이버는 iframe 불가 → 제외)
   enforceImageCount(article, parseInt($("imgCount").value, 10) || 1);
 
@@ -353,9 +367,9 @@ async function finalizeArticle(target, article, keyword, resolvedType) {
     await storeAdd({ type: "article", title: article.title || "", keyword, summary: article.metaDescription || "", platform: target, images: thumb ? [thumb] : [], body: plain });
   } catch {}
 
-  setStatus(target === "blogger"
-    ? "✅ 블로거 메인 완성. HTML 복사→블로거에 붙여넣고 수정 후 발행하세요. 발행 주소를 위에 저장하면 쿠션이 이 글로 유입됩니다."
-    : `✅ ${LABEL[target]} 완성.`);
+  setStatus(target === "wp"
+    ? "✅ 워드프레스(목적지) 완성. 발행 후 그 주소를 위에 저장하면 블로거·네이버 쿠션이 이 글로 유입됩니다. (WP 발행 버튼으로 바로 발행 가능)"
+    : `✅ ${LABEL[target]} 쿠션 완성.`);
 }
 
 function rebuildPreview(target) {
@@ -367,7 +381,7 @@ function rebuildPreview(target) {
       adEnabled: settings.adEnabled, adCode: settings.adCode, accent: settings.overlayAccent || "#e11d48",
       searchLinks: settings.linkMode !== "model", searchContext: r.keyword || r.article?.title || "",
       relatedUrls: myPosts.map((x) => x.link), relatedPosts: myPosts, sources: isNaver ? [] : lastSources,
-      selfUrl: (target === "naver" || target === "wp") ? getDestUrl() : ""
+      selfUrl: (target === "blogger" || target === "naver") ? getDestUrl() : ""   // 쿠션만 목적지 라우팅, WP(목적지)는 제외
     });
     r.html = out.html;
   } catch (e) {
@@ -390,7 +404,7 @@ function showResult(target) {
   $("metaLine").textContent = `제목: ${r.article.title}` + (r.resolvedType ? ` · 유형: ${r.resolvedType}` : "") + `\n메타: ${r.article.metaDescription || "-"}`;
   $("preview").srcdoc = buildPreviewDoc(r.article.title, r.html);
   $("wpActions").classList.toggle("hidden", !(target === "wp" && config.wpEnabled));
-  $("mainUrlRow").classList.toggle("hidden", target !== "blogger");
+  $("mainUrlRow").classList.toggle("hidden", target !== "wp");
   renderImageEditors();
   if (editMode) renderEditor();
 }
@@ -554,7 +568,11 @@ async function wpPublish(status) {
   try {
     setStatus(`워드프레스에 ${label} 중…`);
     const res = await wpCreatePost({ title: r.article.title, content: r.html, status });
-    if (res.link) { try { await saveMyPost({ title: r.article.title, url: res.link, keyword: r.keyword }, (r.html || "").replace(/<[^>]+>/g, " ").slice(0, 4000)); } catch {} }
-    setStatus(`✅ ${label} 완료: ${res.link || ("글 #" + res.id)}`);
+    if (res.link) {
+      try { await saveMyPost({ title: r.article.title, url: res.link, keyword: r.keyword }, (r.html || "").replace(/<[^>]+>/g, " ").slice(0, 4000)); } catch {}
+      // WP가 목적지면 발행 주소를 쿠션 목적지로 자동 세팅
+      if (status === "publish" && activeTarget === "wp") $("bloggerUrl").value = res.link;
+    }
+    setStatus(`✅ ${label} 완료: ${res.link || ("글 #" + res.id)}${status === "publish" && activeTarget === "wp" ? " · 목적지로 설정됨(블로거·네이버 쿠션이 이 글로 유입)" : ""}`);
   } catch (e) { setStatus(`${label} 실패: ` + e.message, true); }
 }
