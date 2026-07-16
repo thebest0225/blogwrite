@@ -18,16 +18,29 @@
   </div>
 
   <main class="wrap">
-    <!-- 왼쪽: 입력/컨트롤 -->
-    <section class="col col-controls">
-      <div class="modebar" id="modeBar">
-        <button class="mode active" data-mode="blogger">블로거 메인</button>
-        <button class="mode" data-mode="naver">네이버</button>
-        <button class="mode" data-mode="wp">워드프레스</button>
+    <!-- 1) 원본 글 (하나만 붙여넣으면 3종 모두 생성) -->
+    <section class="card">
+      <div class="card-title">1. 원본 글 붙여넣기 <span class="muted">— claude.ai 등에서 작성한 상세 글 하나로 블로거·네이버·워드프레스를 모두 만듭니다</span></div>
+      <textarea id="originalText" rows="9" placeholder="claude.ai에서 작성한 상세 글(링크·출처 포함)을 여기에 붙여넣으세요. 이 글 하나로 3종을 생성합니다."></textarea>
+
+      <div class="opt-grid">
+        <label class="field">
+          <span>목적지(메인) URL <span class="muted">— 쿠션이 유입시킬 곳. 블로거 발행 후 저장하면 자동 세팅</span></span>
+          <input type="text" id="bloggerUrl" placeholder="https://내도메인.com/글주소 (비우면 최근 저장글·설정값 자동)" />
+        </label>
+        <div class="imgrow">
+          <label class="check"><input type="checkbox" id="genImages" /><span>이미지 생성</span></label>
+          <label class="imgcount"><span>개수</span>
+            <select id="imgCount"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select>
+          </label>
+          <label class="imgcount"><span>비율</span>
+            <select id="imgAspect"><option value="4:3">4:3</option><option value="16:9">16:9</option><option value="1:1">1:1</option></select>
+          </label>
+        </div>
       </div>
 
       <details class="history" id="trendBox">
-        <summary>🔥 지금 뜨는 트렌드 (6시간마다 갱신 · 클릭해 주제로)</summary>
+        <summary>🔥 지금 뜨는 트렌드 (참고용 · 클릭 시 주제 복사)</summary>
         <div class="row" style="margin-top:8px;align-items:center;">
           <span id="trendMeta" class="muted" style="flex:1;"></span>
           <button class="mini" id="trendRefresh">새로고침</button>
@@ -36,7 +49,7 @@
       </details>
 
       <details class="history" id="myPostsBox">
-        <summary>🔗 내 글 보관함 (링크 걸 때 여기서 먼저 찾음)</summary>
+        <summary>🔗 발행 글 보관함 (DB에 누적 · 쿠션·연관글 링크로 자동 활용)</summary>
         <div class="row" style="margin-top:8px;">
           <input type="text" id="myPostSearch" placeholder="보관함 검색 (제목/키워드)" />
         </div>
@@ -44,66 +57,56 @@
           <input type="text" id="myPostTitle" placeholder="글 제목/키워드" />
         </div>
         <div class="row" style="margin-top:6px;">
-          <input type="text" id="myPostUrl" placeholder="https://내글주소" />
+          <input type="text" id="myPostUrl" placeholder="https://발행된-내글-주소" />
           <button class="mini" id="myPostAdd">추가</button>
         </div>
         <div id="myPostsCount" class="hist-count"></div>
         <div id="myPostsList" class="history-list" style="margin-top:6px;"></div>
       </details>
-
-      <label class="field">
-        <span>원본 글 (claude.ai 등에서 작성해 붙여넣기 · 텍스트/HTML 모두 가능)</span>
-        <textarea id="originalText" rows="9" placeholder="정확한 원본 글을 여기에 붙여넣으세요. 이 툴이 디자인·보강·변형·썸네일·링크를 담당합니다."></textarea>
-      </label>
-
-      <label class="field hidden" id="bloggerUrlRow">
-        <span>목적지(메인) URL — 쿠션이 유입시킬 곳 (블로거/자체도메인 발행 후 주소, 비우면 최근 저장글·설정값 자동)</span>
-        <input type="text" id="bloggerUrl" placeholder="https://내도메인.com/글주소 (비우면 자동)" />
-      </label>
-
-      <div class="imgrow">
-        <label class="check"><input type="checkbox" id="genImages" /><span>이미지 생성</span></label>
-        <label class="imgcount"><span>개수</span>
-          <select id="imgCount">
-            <option value="1">1 (썸네일만)</option><option value="2">2</option>
-            <option value="3">3</option><option value="4">4</option>
-          </select>
-        </label>
-        <label class="imgcount"><span>비율</span>
-          <select id="imgAspect">
-            <option value="4:3">4:3</option><option value="16:9">16:9</option><option value="1:1">1:1</option>
-          </select>
-        </label>
-      </div>
-
-      <button class="primary" id="generateBtn">✨ 블로거 메인 완성</button>
-      <div id="status" class="status hidden"></div>
     </section>
 
-    <!-- 오른쪽: 결과/미리보기 -->
-    <section class="col col-result">
-      <section id="result" class="result hidden">
-        <div class="result-head">
-          <strong>미리보기</strong>
-          <div class="result-actions">
-            <button class="mini primary-mini" id="copyBtn">📋 HTML 복사</button>
-          </div>
-        </div>
-        <div class="result-actions wp-actions hidden" id="wpActions">
-          <button class="mini" id="wpDraftBtn">WP 초안저장</button>
-          <button class="mini primary-mini" id="wpPublishBtn">WP 바로발행</button>
-        </div>
-        <div class="meta-line" id="metaLine"></div>
-        <iframe id="preview" class="preview"></iframe>
-
-        <details class="imgedit hidden" id="imgEditBox">
-          <summary>🖌️ 이미지 수정 / 다시 생성</summary>
-          <div id="imgEditList" class="imgedit-list"></div>
-        </details>
-      </section>
-      <div id="resultEmpty" class="result-empty">
-        <div>왼쪽에 원본 글을 붙여넣고 <b>완성</b>을 누르면<br/>여기에 미리보기가 나타납니다.</div>
+    <!-- 2) 순차 생성 -->
+    <section class="card">
+      <div class="card-title">2. 순차 생성</div>
+      <p class="muted" style="margin:.2em 0 .8em;">권장 순서: ① 블로거 메인 생성 → 발행(직접 수정 후) → 발행 주소 저장 → ② 네이버 · ③ 워드프레스(그 주소로 자동 유입)</p>
+      <div class="gen-btns">
+        <button class="genbtn" id="genBlogger"><b>① 블로거 메인</b><span>최종 목적지 · 가장 깊이</span></button>
+        <button class="genbtn" id="genNaver"><b>② 네이버</b><span>쿠션 · 친근체 · 링크 1개</span></button>
+        <button class="genbtn" id="genWp"><b>③ 워드프레스</b><span>하이브리드 · 쿠션+목적지</span></button>
       </div>
+      <div id="status" class="status hidden" style="margin-top:10px;"></div>
+    </section>
+
+    <!-- 3) 결과 (탭으로 3종 확인) -->
+    <section class="card" id="resultCard" style="display:none;">
+      <div class="restabs">
+        <button class="restab" data-t="blogger" id="rt-blogger">블로거 메인</button>
+        <button class="restab" data-t="naver" id="rt-naver">네이버</button>
+        <button class="restab" data-t="wp" id="rt-wp">워드프레스</button>
+      </div>
+
+      <!-- 블로거: 발행 URL 저장 -->
+      <div class="mainurl-row hidden" id="mainUrlRow">
+        <span class="muted">발행하셨나요? 발행된 주소를 저장하면 네이버·워드프레스가 이 글로 유입됩니다 →</span>
+        <input type="text" id="mainUrlInput" placeholder="https://발행된-블로거-글-주소" />
+        <button class="mini primary-mini" id="mainUrlSave">발행주소 저장</button>
+      </div>
+
+      <div class="result-head">
+        <div class="meta-line" id="metaLine"></div>
+        <div class="result-actions">
+          <button class="mini primary-mini" id="copyBtn">📋 HTML 복사</button>
+          <span id="wpActions" class="result-actions hidden">
+            <button class="mini" id="wpDraftBtn">WP 초안</button>
+            <button class="mini primary-mini" id="wpPublishBtn">WP 발행</button>
+          </span>
+        </div>
+      </div>
+      <iframe id="preview" class="preview"></iframe>
+      <details class="imgedit hidden" id="imgEditBox">
+        <summary>🖌️ 이미지 수정 / 다시 생성</summary>
+        <div id="imgEditList" class="imgedit-list"></div>
+      </details>
     </section>
   </main>
 
@@ -112,7 +115,6 @@
     <form method="dialog" class="optform" id="optForm">
       <h3>설정</h3>
       <p class="muted">API 키는 서버 <code>.env</code> 에서 관리됩니다. 여기서는 비민감 값만 저장됩니다.</p>
-
       <label class="field"><span>글 생성 모델</span>
         <select id="optChatModel">
           <option value="claude-sonnet-5">Claude Sonnet 5 (기본·빠름)</option>
@@ -121,11 +123,7 @@
       </label>
       <div class="grid2">
         <label class="field"><span>썸네일 방식</span>
-          <select id="optThumbMode">
-            <option value="ai_full">AI 통짜(한글까지 생성)</option>
-            <option value="overlay">AI배경+텍스트 오버레이</option>
-            <option value="off">끄기</option>
-          </select>
+          <select id="optThumbMode"><option value="ai_full">AI 통짜(한글까지)</option><option value="overlay">AI배경+텍스트</option><option value="off">끄기</option></select>
         </label>
         <label class="field"><span>이미지 해상도</span>
           <select id="optImgRes"><option value="1K">1K</option><option value="2K">2K</option><option value="4K">4K</option></select>
@@ -135,28 +133,17 @@
         <label class="field"><span>링크 처리</span>
           <select id="optLinkMode"><option value="search">검색결과로 안전</option><option value="model">모델 URL 사용</option></select>
         </label>
-        <label class="field"><span>오버레이 액센트</span>
-          <input type="color" id="optAccent" value="#ff2d55" />
-        </label>
+        <label class="field"><span>오버레이 액센트</span><input type="color" id="optAccent" value="#ff2d55" /></label>
       </div>
-      <label class="field"><span>내 블로그 주소 (우선 링크·유입 대상)</span>
-        <input type="text" id="optMyBlog" placeholder="https://blog.example.com" />
-      </label>
+      <label class="field"><span>내 블로그/사이트 주소 (기본 목적지)</span><input type="text" id="optMyBlog" placeholder="https://내도메인.com" /></label>
       <div class="grid2">
         <label class="field"><span>기본 톤</span><input type="text" id="optTone" /></label>
         <label class="field"><span>대상 독자</span><input type="text" id="optAudience" /></label>
       </div>
-      <label class="field"><span>저자 소개 (E-E-A-T · 글 하단 삽입)</span>
-        <textarea id="optAuthorBio" rows="2"></textarea>
-      </label>
-      <label class="field"><span>썸네일 스타일 지시 (비우면 기본값)</span>
-        <textarea id="optThumbStyle" rows="3" placeholder="비우면 내장 기본 스타일 사용"></textarea>
-      </label>
+      <label class="field"><span>저자 소개 (E-E-A-T · 글 하단)</span><textarea id="optAuthorBio" rows="2"></textarea></label>
+      <label class="field"><span>썸네일 스타일 지시 (비우면 기본값)</span><textarea id="optThumbStyle" rows="3"></textarea></label>
       <label class="check"><input type="checkbox" id="optAdEnabled" /><span>애드센스 광고 자동 삽입</span></label>
-      <label class="field"><span>광고 유닛 HTML</span>
-        <textarea id="optAdCode" rows="2" placeholder="<ins class=adsbygoogle ...></ins>"></textarea>
-      </label>
-
+      <label class="field"><span>광고 유닛 HTML</span><textarea id="optAdCode" rows="2"></textarea></label>
       <div class="optbtns">
         <button type="button" class="mini" id="optClose">닫기</button>
         <button type="button" class="mini primary-mini" id="optSave">저장</button>

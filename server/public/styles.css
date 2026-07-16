@@ -29,16 +29,31 @@ code { background: #eef2ff; padding: 1px 5px; border-radius: 4px; font-size: 12p
 
 .warn { background: #fff4e5; color: #92400e; padding: 10px 20px; font-size: 13px; border-bottom: 1px solid #fde68a; }
 
-.wrap {
-  max-width: 1200px; margin: 0 auto; padding: 20px;
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 20px;
-}
-@media (max-width: 900px) { .wrap { grid-template-columns: 1fr; } }
+.wrap { max-width: 980px; margin: 0 auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
 
-.col { display: flex; flex-direction: column; gap: 12px; }
-.col-controls { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
-.col-result { position: sticky; top: 84px; align-self: start; }
-@media (max-width: 900px) { .col-result { position: static; } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+.card-title { font-size: 15px; font-weight: 800; letter-spacing: -0.01em; }
+.opt-grid { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: end; }
+@media (max-width: 640px) { .opt-grid { grid-template-columns: 1fr; } }
+
+/* 순차 생성 버튼 */
+.gen-btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+@media (max-width: 640px) { .gen-btns { grid-template-columns: 1fr; } }
+.genbtn { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; text-align: left; border: 1px solid #d1d5db; background: #fff; border-radius: 12px; padding: 14px 16px; cursor: pointer; transition: all .2s; }
+.genbtn b { font-size: 14px; color: var(--ink); }
+.genbtn span { font-size: 11px; color: var(--muted); }
+.genbtn:hover { border-color: var(--accent); box-shadow: 0 4px 14px rgba(37,99,235,.12); transform: translateY(-1px); }
+.genbtn:disabled { opacity: .5; cursor: default; transform: none; box-shadow: none; }
+
+/* 결과 탭 */
+.restabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+.restab { border: 1px solid var(--line); background: #f3f4f6; color: #9ca3af; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 13px; }
+.restab.has { color: #374151; background: #fff; }
+.restab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.mainurl-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: #f0f7ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 10px 12px; }
+.mainurl-row input { flex: 1; min-width: 200px; }
+.mainurl-row .muted { flex-basis: 100%; }
 
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field > span { font-size: 12px; color: var(--muted); font-weight: 600; }

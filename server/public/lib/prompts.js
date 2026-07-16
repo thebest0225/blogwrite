@@ -292,6 +292,7 @@ ${linkRule}
 - 사실 단정 금지(모르면 두루뭉술 + 링크로 확인 유도).
 
 ${GLOBAL_RULES}
+${TYPE_RULES[resolved] || ""}
 
 [작성 조건]
 - 대상 독자: ${audience}
