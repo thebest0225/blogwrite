@@ -46,8 +46,9 @@ const S = {
 // 1) 모델(claude 리서치) URL 모드 && 모델이 실제 URL을 준 경우 → 그대로
 // 2) 그 외 → 버튼 문구의 '의도'에 맞는 실제 목적지로 라우팅(smartLink)
 function resolveHref(url, label, cfg) {
-  if (!cfg.searchLinks && url && url !== "#") return url;
-  // 네이버 쿠션 모드: '자세히 보기'류 문구는 내 원본 글로 연결
+  // 1) 원본/모델이 준 '실제 URL'은 항상 그대로 사용 (원본 링크 최대한 활용)
+  if (url && url !== "#" && /^https?:\/\//i.test(url)) return url;
+  // 2) '자세히 보기'류 문구는 목적지(내 메인/원본)로 연결
   if (cfg.selfUrl) {
     const l = String(label || "");
     const selfish = /자세히|전체|더보기|더 알아|원문|본문|계속|모두\s*보|보러\s*가|확인하러|여기서\s*확인|원글|전체\s*순위/.test(l);

@@ -63,6 +63,7 @@ async function init() {
   $("genNaver").addEventListener("click", () => generate("naver"));
   $("genWp").addEventListener("click", () => generate("wp"));
   document.querySelectorAll(".restab").forEach((b) => b.addEventListener("click", () => showResult(b.dataset.t)));
+  $("editToggle").addEventListener("click", toggleEdit);
   $("copyBtn").addEventListener("click", onCopy);
   $("wpDraftBtn").addEventListener("click", () => wpPublish("draft"));
   $("wpPublishBtn").addEventListener("click", () => wpPublish("publish"));
@@ -278,15 +279,25 @@ async function genBlockImage(target, b, article, keyword) {
 }
 function safeResolution(aspect) { const res = settings.imageResolution || "1K"; const [aw, ah] = (aspect || "16:9").split(":").map(Number); if (aw === ah && res === "4K") return "2K"; return res; }
 
-// WP 하이브리드: 상단 클릭 유도 링크카드(2개)
-function ensureTopLinkcard(article, keyword) {
+// 상단 클릭 유도 링크카드: (쿠션) 목적지 자세히보기 + (공통) 내 블로그 연관글 바로가기
+// target: blogger|wp|naver, relatedPosts: [{title,link}], destUrl: 목적지
+function ensureTopLinkcard(target, article, keyword, relatedPosts, destUrl) {
   const blocks = article.blocks || [];
-  if (blocks.slice(0, 4).some((b) => b.type === "linkcard")) return;
+  if (blocks.slice(0, 4).some((b) => b.type === "linkcard")) return;   // 모델이 이미 상단 카드 만들었으면 존중
   const kw = (keyword || article.title || "").trim();
-  const card = { type: "linkcard", heading: "👉 먼저 확인하세요", items: [
-    { icon: "▶️", title: `${kw} 전체 내용 자세히 보기`, subtitle: "핵심 정리·자세한 정보", label: "자세히 보기 →", featured: true },
-    { icon: "📌", title: `${kw} 관련 정보 총정리`, subtitle: "한눈에 보기", label: "총정리 →" }
-  ] };
+  const items = [];
+  // 쿠션(wp): 목적지(원본)로 유입하는 featured 버튼
+  if (target !== "blogger" && destUrl) {
+    items.push({ icon: "▶️", title: `${kw} 전체 내용 자세히 보기`, subtitle: "핵심만 빠르게 확인", label: "자세히 보기 →", url: destUrl, featured: true });
+  }
+  // 공통: 내 블로그 연관글을 '누르고 싶은' 바로가기로 (블로거 메인도 포함)
+  const enticers = ["지금 바로 확인 →", "안 보면 손해 →", "여기서 확인 →", "바로가기 →"];
+  (relatedPosts || []).slice(0, 3).forEach((p, i) => {
+    items.push({ icon: "🔗", title: p.title, subtitle: "함께 보면 좋은 글", label: enticers[i] || "바로가기 →", url: p.link, featured: (target === "blogger" && i === 0 && !items.length) });
+  });
+  if (!items.length) return;   // 넣을 게 없으면(연관글 없고 목적지도 없음) 생략
+  const heading = target === "blogger" ? "👉 이 글과 함께 보면 좋아요" : "👉 먼저 확인하세요";
+  const card = { type: "linkcard", heading, items };
   let idx = blocks.findIndex((b) => b.type === "image" && b.slot === "thumbnail"); idx = idx >= 0 ? idx + 1 : 0;
   blocks.splice(idx, 0, card); article.blocks = blocks;
 }
@@ -299,8 +310,9 @@ function enforceNaverSingleLink(article, keyword) {
 
 async function finalizeArticle(target, article, keyword, resolvedType) {
   article.today = todayStr(); article.authorBio = settings.authorBio;
-  if (target === "wp") ensureTopLinkcard(article, keyword);
+  if (target === "wp") ensureTopLinkcard("wp", article, keyword, lastMyPosts, getDestUrl());
   else if (target === "naver") enforceNaverSingleLink(article, keyword);
+  else if (target === "blogger" && lastMyPosts.length) ensureTopLinkcard("blogger", article, keyword, lastMyPosts, "");
   enforceImageCount(article, parseInt($("imgCount").value, 10) || 1);
 
   if ($("genImages").checked && config.kieEnabled) {
@@ -361,6 +373,98 @@ function showResult(target) {
   $("wpActions").classList.toggle("hidden", !(target === "wp" && config.wpEnabled));
   $("mainUrlRow").classList.toggle("hidden", target !== "blogger");
   renderImageEditors();
+  if (editMode) renderEditor();
+}
+
+// ---------- 편집 모드 (블록 추가/삭제/수정) ----------
+let editMode = false;
+function toggleEdit() {
+  editMode = !editMode;
+  $("editToggle").classList.toggle("primary-mini", editMode);
+  $("editToggle").textContent = editMode ? "✅ 편집 완료" : "✏️ 편집";
+  $("editor").classList.toggle("hidden", !editMode);
+  if (editMode) renderEditor();
+}
+function refreshAfterEdit() {
+  rebuildPreview(activeTarget);
+  const r = results[activeTarget];
+  $("preview").srcdoc = buildPreviewDoc(r.article.title, r.html);
+  renderEditor();
+}
+const ED_TYPE = { paragraph: "문단", heading: "제목", list: "리스트", table: "표", callout: "박스", cta: "버튼", linkcard: "링크카드", image: "이미지" };
+function edSummary(b) {
+  if (b.type === "cta") return `[버튼] ${b.label || ""} → ${b.url || "#"}`;
+  if (b.type === "image") return `[이미지] ${b.alt || b.prompt || ""}${b.resolvedUrl ? " (생성됨)" : ""}`;
+  if (b.type === "linkcard") return `[링크카드] ${(b.items || []).map((x) => x.title).join(", ")}`;
+  if (b.type === "list") return (b.items || []).join(" · ");
+  if (b.type === "table") return `표 ${(b.rows || []).length}행`;
+  if (b.type === "callout") return `[박스] ${b.text || ""}`;
+  return "";
+}
+function renderEditor() {
+  const box = $("editor"); box.innerHTML = "";
+  const r = results[activeTarget];
+  if (!r) { box.innerHTML = '<div class="ed-hint">생성된 글이 없습니다.</div>'; return; }
+  box.appendChild(edHint());
+  const blocks = r.article.blocks || [];
+  box.appendChild(insertBar(0));
+  blocks.forEach((b, i) => { box.appendChild(blockRow(b, i)); box.appendChild(insertBar(i + 1)); });
+}
+function edHint() { const d = document.createElement("div"); d.className = "ed-hint"; d.textContent = "블록 사이에 마우스를 올리면 글·버튼·이미지를 추가할 수 있어요. 제목/문단은 바로 수정, ✕로 삭제됩니다. (수정 후 미리보기·복사에 반영)"; return d; }
+function insertBar(index) {
+  const bar = document.createElement("div"); bar.className = "ed-insert";
+  const mk = (label, fn) => { const btn = document.createElement("button"); btn.textContent = label; btn.addEventListener("click", () => fn(index, bar)); return btn; };
+  bar.appendChild(mk("+ 글", addTextAt));
+  bar.appendChild(mk("+ 버튼", addButtonAt));
+  bar.appendChild(mk("+ 이미지", addImageAt));
+  return bar;
+}
+function blockRow(b, i) {
+  const row = document.createElement("div"); row.className = "ed-block";
+  const del = document.createElement("button"); del.className = "ed-del"; del.textContent = "✕";
+  del.addEventListener("click", () => { results[activeTarget].article.blocks.splice(i, 1); refreshAfterEdit(); });
+  row.appendChild(del);
+  const type = document.createElement("div"); type.className = "ed-type"; type.textContent = ED_TYPE[b.type] || b.type; row.appendChild(type);
+  if (b.type === "paragraph" || b.type === "heading") {
+    const ta = document.createElement("textarea"); ta.rows = b.type === "heading" ? 1 : 3; ta.value = b.text || "";
+    ta.addEventListener("input", () => { b.text = ta.value; });
+    ta.addEventListener("blur", refreshAfterEdit);
+    row.appendChild(ta);
+  } else {
+    const body = document.createElement("div"); body.className = "ed-body"; body.textContent = edSummary(b); row.appendChild(body);
+  }
+  return row;
+}
+function addTextAt(index) { results[activeTarget].article.blocks.splice(index, 0, { type: "paragraph", text: "새 문단 내용을 입력하세요." }); refreshAfterEdit(); }
+function addButtonAt(index, bar) {
+  const form = document.createElement("div"); form.className = "ed-form";
+  const label = document.createElement("input"); label.placeholder = "버튼 문구 (예: 자세히 보기 →)";
+  const url = document.createElement("input"); url.placeholder = "링크 URL (비우면 목적지로)";
+  const ok = document.createElement("button"); ok.className = "mini primary-mini"; ok.textContent = "추가";
+  ok.addEventListener("click", () => {
+    const u = url.value.trim() || getDestUrl() || "#";
+    results[activeTarget].article.blocks.splice(index, 0, { type: "cta", label: label.value.trim() || "자세히 보기 →", url: u });
+    refreshAfterEdit();
+  });
+  form.appendChild(label); form.appendChild(url); form.appendChild(ok);
+  bar.replaceWith(form); label.focus();
+}
+async function addImageAt(index, bar) {
+  const form = document.createElement("div"); form.className = "ed-form";
+  const desc = document.createElement("input"); desc.placeholder = "이미지 설명 (예: 성산일출봉 일출 풍경)";
+  const ok = document.createElement("button"); ok.className = "mini primary-mini"; ok.textContent = "생성";
+  ok.addEventListener("click", async () => {
+    if (!config.kieEnabled) { setStatus("KIE 키가 필요합니다.", true); return; }
+    ok.disabled = true; ok.textContent = "생성중…";
+    try {
+      const p = desc.value.trim() || results[activeTarget]?.keyword || "";
+      const u = await generateImage({ prompt: p, aspectRatio: "4:3", resolution: safeResolution("4:3") });
+      results[activeTarget].article.blocks.splice(index, 0, { type: "image", slot: "body", alt: desc.value.trim(), resolvedUrl: u, _genPrompt: p, _aspect: "4:3" });
+      refreshAfterEdit();
+    } catch (e) { setStatus("이미지 생성 실패: " + e.message, true); ok.disabled = false; ok.textContent = "생성"; }
+  });
+  form.appendChild(desc); form.appendChild(ok);
+  bar.replaceWith(form); desc.focus();
 }
 
 // ---------- 이미지 수정 ----------

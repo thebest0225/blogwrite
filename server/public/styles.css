@@ -55,6 +55,22 @@ code { background: #eef2ff; padding: 1px 5px; border-radius: 4px; font-size: 12p
 .mainurl-row input { flex: 1; min-width: 200px; }
 .mainurl-row .muted { flex-basis: 100%; }
 
+/* 편집 모드 */
+.editor { border: 1px solid var(--line); border-radius: 12px; padding: 8px; background: #fafbfc; }
+.ed-block { position: relative; border: 1px solid #e5e7eb; background: #fff; border-radius: 8px; padding: 8px 34px 8px 10px; margin: 2px 0; }
+.ed-block .ed-type { font-size: 10px; color: var(--muted); font-weight: 700; text-transform: uppercase; }
+.ed-block .ed-body { font-size: 13px; color: #333; white-space: pre-wrap; word-break: break-word; }
+.ed-block textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 6px; font: inherit; font-size: 13px; padding: 6px 8px; resize: vertical; }
+.ed-del { position: absolute; top: 6px; right: 6px; border: none; background: none; color: #cbd5e1; cursor: pointer; font-size: 14px; }
+.ed-del:hover { color: #dc2626; }
+.ed-insert { height: 10px; display: flex; align-items: center; justify-content: center; gap: 6px; opacity: 0; transition: opacity .15s, height .15s; overflow: hidden; }
+.ed-insert:hover, .ed-insert.open { opacity: 1; height: 34px; }
+.ed-insert button { border: 1px solid #d1d5db; background: #fff; border-radius: 999px; padding: 4px 12px; font-size: 12px; cursor: pointer; font-weight: 600; }
+.ed-insert button:hover { border-color: var(--accent); color: var(--accent); }
+.ed-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 4px 0; padding: 8px; background: #eef2ff; border-radius: 8px; }
+.ed-form input { flex: 1; min-width: 120px; }
+.ed-hint { font-size: 11px; color: var(--muted); padding: 4px 2px; }
+
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field > span { font-size: 12px; color: var(--muted); font-weight: 600; }
 .row { display: flex; gap: 8px; }
