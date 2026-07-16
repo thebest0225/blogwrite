@@ -1,0 +1,259 @@
+// 생성된 JSON(article) → 플랫폼 독립 HTML(인라인 스타일) + JSON-LD 스키마
+// 모든 스타일은 인라인으로 넣어 워드프레스/블로거 어디에 붙여도 깨지지 않게 함.
+
+function esc(s = "") {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// **굵게** 와 [텍스트](url) 만 허용하는 간단 인라인 변환
+function inline(s = "") {
+  let t = esc(s);
+  t = t.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener" style="color:#2563eb;text-decoration:underline;">$1</a>');
+  return t;
+}
+
+const S = {
+  h2: "font-size:1.5em;font-weight:700;margin:1.6em 0 0.6em;padding-bottom:0.2em;border-bottom:2px solid #eee;",
+  h3: "font-size:1.2em;font-weight:700;margin:1.2em 0 0.5em;",
+  p: "line-height:1.8;margin:0.8em 0;color:#222;",
+  table: "border-collapse:collapse;width:100%;margin:1em 0;font-size:0.95em;",
+  th: "border:1px solid #ddd;background:#f5f7fa;padding:10px;text-align:left;font-weight:700;",
+  td: "border:1px solid #ddd;padding:10px;vertical-align:top;",
+  li: "line-height:1.8;margin:0.3em 0;",
+  img: "max-width:100%;height:auto;border-radius:10px;margin:1em 0;display:block;",
+  ctaWrap: "text-align:center;margin:1.5em 0;",
+  cta: "display:inline-block;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;padding:14px 28px;border-radius:8px;font-weight:700;text-decoration:none;box-shadow:0 3px 8px rgba(37,99,235,.3);",
+  callout: {
+    tip: "background:#eef7ee;border-left:4px solid #34a853;",
+    warning: "background:#fff4e5;border-left:4px solid #f59e0b;",
+    info: "background:#eef2ff;border-left:4px solid #6366f1;"
+  },
+  calloutBase: "padding:14px 16px;border-radius:6px;margin:1.2em 0;line-height:1.7;",
+  faqWrap: "margin:1.2em 0;",
+  faqQ: "font-weight:700;margin:1em 0 0.3em;color:#111;",
+  faqA: "line-height:1.8;margin:0 0 0.8em;color:#333;",
+  related: "margin-top:2em;padding-top:1em;border-top:1px dashed #ccc;color:#666;font-size:0.9em;",
+  updated: "color:#888;font-size:0.85em;margin:0.3em 0 1em;"
+};
+
+// 링크 URL 해석:
+// 1) 모델(claude 리서치) URL 모드 && 모델이 실제 URL을 준 경우 → 그대로
+// 2) 그 외 → 버튼 문구의 '의도'에 맞는 실제 목적지로 라우팅(smartLink)
+function resolveHref(url, label, cfg) {
+  if (!cfg.searchLinks && url && url !== "#") return url;
+  // 네이버 쿠션 모드: '자세히 보기'류 문구는 내 원본 글로 연결
+  if (cfg.selfUrl) {
+    const l = String(label || "");
+    const selfish = /자세히|전체|더보기|더 알아|원문|본문|계속|모두\s*보|보러\s*가|확인하러|여기서\s*확인|원글|전체\s*순위/.test(l);
+    const official = /넷플릭스|netflix|티빙|웨이브|디즈니|유튜브|youtube|나무위키|위키|공식|예고편|뉴스|기사|쿠팡/i.test(l);
+    if (selfish && !official) return cfg.selfUrl;
+  }
+  return smartLink(label, cfg);
+}
+
+// 버튼 문구 뜻에 맞는 실제 목적지 URL 생성.
+// 특정 OTT/방송사는 억측하지 않는다(자주 틀림). 시청류는 네이버 '다시보기' 검색으로 → 네이버가 실제 시청처를 보여줌.
+function smartLink(label, cfg) {
+  const raw = String(label || "");
+  const L = raw.toLowerCase();
+  const enc = encodeURIComponent;
+  // 제목 추출: 플랫폼명 + 동작어(시청하기·정주행·보러가기 등)를 최대한 제거
+  let t = raw
+    .replace(/넷플릭스에서|넷플릭스|netflix|티빙에서|티빙|tving|웨이브에서|웨이브|wavve|디즈니플러스|디즈니\s*\+|디즈니|disney|왓챠|쿠팡플레이|유플러스|u\+|jtbc|tvn|sbs|kbs|mbc|유튜브에서|유튜브|youtube|나무위키|위키백과|위키|wiki|공식|홈페이지|사이트/gi, "")
+    .replace(/에서|정주행하기|정주행|몰아보기|다시보기|시청하기|시청|보러가기|보러|바로가기|바로|둘러보기|알아보기|확인하기|확인하러|확인|더보기|해보기|보기|찾기|계속|하기|하러/gi, "")
+    .replace(/[▶👉→\-–—:·|/]|📺|🎬|🔥|📖|🎯|👥|📱|💬|📰/g, " ")
+    .replace(/\s+/g, " ").trim();
+  if (t.length < 2) t = cfg.searchContext || raw;
+  const q = t;
+
+  if (/유튜브|youtube|예고편|트레일러|trailer|영상/i.test(L)) return "https://www.youtube.com/results?search_query=" + enc(q);
+  if (/나무위키|namu/i.test(L)) return "https://namu.wiki/Search?q=" + enc(q);
+  if (/위키|wiki/i.test(L)) return "https://ko.wikipedia.org/w/index.php?search=" + enc(q);
+  if (/뉴스|기사|속보|캐스팅|인터뷰/i.test(L)) return "https://search.naver.com/search.naver?where=news&query=" + enc(q);
+  if (/쿠팡|구매|최저가|가격|주문|사기/i.test(L)) return "https://www.coupang.com/np/search?q=" + enc(q);
+  if (/시청|다시보기|스트리밍|ott|방송|어디서|정주행|몰아보기|보기/i.test(L)) return cfg.searchBase + enc(q + " 다시보기");
+  return cfg.searchBase + enc(q); // 기본: 네이버 통합검색(제목)
+}
+
+function renderBlock(b, cfg) {
+  const accent = cfg.accent;
+  switch (b.type) {
+    case "heading":
+      return b.level === 3
+        ? `<h3 style="${S.h3}">${esc(b.text)}</h3>`
+        : `<h2 style="${S.h2}">${esc(b.text)}</h2>`;
+    case "paragraph":
+      return `<p style="${S.p}">${inline(b.text)}</p>`;
+    case "list": {
+      const tag = b.ordered ? "ol" : "ul";
+      const items = (b.items || []).map((it) => `<li style="${S.li}">${inline(it)}</li>`).join("");
+      return `<${tag} style="padding-left:1.4em;margin:0.8em 0;">${items}</${tag}>`;
+    }
+    case "table": {
+      const head = (b.headers || []).map((h) => `<th style="${S.th}">${esc(h)}</th>`).join("");
+      const body = (b.rows || [])
+        .map((r) => `<tr>${r.map((c) => `<td style="${S.td}">${inline(c)}</td>`).join("")}</tr>`)
+        .join("");
+      return `<table style="${S.table}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+    }
+    case "callout": {
+      const style = S.callout[b.style] || S.callout.info;
+      return `<div style="${S.calloutBase}${style}">${inline(b.text)}</div>`;
+    }
+    case "cta": {
+      const url = resolveHref(b.url, b.label, cfg);
+      const cta = `display:inline-block;background:${accent};color:#fff;padding:13px 28px;border-radius:10px;font-weight:700;text-decoration:none;box-shadow:0 3px 10px rgba(0,0,0,.18);`;
+      return `<div style="text-align:center;margin:1.4em 0;"><a class="awb-cta" href="${esc(url)}" target="_blank" rel="noopener" style="${cta}">${esc(b.label || "자세히 보기")}</a></div>`;
+    }
+    case "linkcard": {
+      const rows = (b.items || []).map((it) => {
+        const feat = !!it.featured;
+        const href = resolveHref(it.url, it.title || it.label, cfg);
+        const rowBg = feat ? "#1a1a1a" : "#fff";
+        const rowBorder = feat ? "#1a1a1a" : "#eee";
+        const tColor = feat ? "#ffffff" : "#111";
+        const sColor = feat ? "#cfcfcf" : "#888";
+        const icoBg = feat ? accent : "#ffe4e6";
+        return `<a href="${esc(href)}" target="_blank" rel="noopener" style="text-decoration:none;display:block;">`
+          + `<div class="awb-row" style="display:flex;align-items:center;gap:12px;border:1px solid ${rowBorder};border-radius:12px;padding:12px 14px;margin:8px 0;background:${rowBg};">`
+          + `<div style="width:40px;height:40px;border-radius:10px;background:${icoBg};display:flex;align-items:center;justify-content:center;font-size:18px;flex:none;">${esc(it.icon || "▶")}</div>`
+          + `<div style="flex:1;min-width:0;"><div style="font-weight:700;color:${tColor};">${esc(it.title || "")}</div>`
+          + `${it.subtitle ? `<div style="font-size:.82em;color:${sColor};margin-top:2px;">${esc(it.subtitle)}</div>` : ""}</div>`
+          + `<div class="awb-btn" style="background:${accent};color:#fff;border-radius:999px;padding:8px 16px;font-weight:700;font-size:.85em;white-space:nowrap;">${esc(it.label || "보기 →")}</div>`
+          + `</div></a>`;
+      }).join("");
+      return `<div style="border:1px solid #f0dede;border-radius:18px;padding:16px;margin:1.5em 0;background:linear-gradient(180deg,#ffffff,#fff8f8);box-shadow:0 8px 24px rgba(0,0,0,.06);">`
+        + `${b.heading ? `<h4 style="margin:0 0 10px;font-size:1em;font-weight:700;color:${accent};">${esc(b.heading)}</h4>` : ""}${rows}</div>`;
+    }
+    case "image": {
+      // 모델이 클릭형으로 지정한 이미지만 링크로. URL은 검색결과로 안전하게 해석.
+      const link = (b.linkUrl && b.linkUrl !== "#") ? resolveHref(b.linkUrl, b.alt || cfg.searchContext, cfg) : "";
+      if (b.resolvedUrl) {
+        const img = `<img src="${esc(b.resolvedUrl)}" alt="${esc(b.alt || "")}" style="${S.img}"/>`;
+        // 클릭형 링크 이미지
+        if (link) {
+          return `<a href="${esc(link)}" target="_blank" rel="noopener" style="text-decoration:none;">${img}${b.alt ? `<span style="display:block;text-align:center;color:#888;font-size:0.85em;margin-top:-4px;">${esc(b.alt)}</span>` : ""}</a>`;
+        }
+        return img;
+      }
+      // 이미지 미생성 시 자리표시(클릭형이면 링크 표시)
+      const badge = link ? " · 🔗클릭형" : "";
+      const ph = `<div style="background:#f0f0f0;border:1px dashed #bbb;border-radius:10px;padding:24px;text-align:center;color:#999;margin:1em 0;">🖼️ 이미지 자리 (${esc(b.slot || "body")}${badge}) — ${esc(b.alt || b.prompt || "")}</div>`;
+      return link ? `<a href="${esc(link)}" target="_blank" rel="noopener" style="text-decoration:none;">${ph}</a>` : ph;
+    }
+    default:
+      return "";
+  }
+}
+
+function renderFaq(faq = []) {
+  if (!faq.length) return "";
+  const items = faq
+    .map((f) => `<div><p style="${S.faqQ}">Q. ${esc(f.q)}</p><p style="${S.faqA}">A. ${inline(f.a)}</p></div>`)
+    .join("");
+  return `<h2 style="${S.h2}">자주 묻는 질문 (FAQ)</h2><div style="${S.faqWrap}">${items}</div>`;
+}
+
+function buildSchema(article) {
+  const graph = [];
+  graph.push({
+    "@type": "Article",
+    "headline": article.title,
+    "description": article.metaDescription,
+    "dateModified": article.today || undefined
+  });
+  if (article.faq?.length) {
+    graph.push({
+      "@type": "FAQPage",
+      "mainEntity": article.faq.map((f) => ({
+        "@type": "Question",
+        "name": f.q,
+        "acceptedAnswer": { "@type": "Answer", "text": f.a }
+      }))
+    });
+  }
+  return { "@context": "https://schema.org", "@graph": graph };
+}
+
+// article: buildPrompt로 생성돼 파싱된 객체 (+ today, +authorBio 주입 가능)
+// opts: { adEnabled, adCode } 광고 자동 삽입
+// 반환: { html, htmlWithSchema, schema }
+export function buildHtml(article, opts = {}) {
+  const parts = [];
+  const accent = opts.accent || "#e11d48";
+  const cfg = {
+    accent,
+    searchLinks: opts.searchLinks !== false,   // 기본: 링크를 안전하게 처리(관련 URL/검색)
+    searchBase: opts.searchBase || "https://search.naver.com/search.naver?query=",
+    searchContext: opts.searchContext || "",
+    relatedUrls: Array.isArray(opts.relatedUrls) ? opts.relatedUrls : [],
+    selfUrl: opts.selfUrl || "",
+    _i: 0
+  };
+  // 마우스오버 효과용 스타일(인라인은 :hover 불가라 style 블록 사용, 없어도 기본은 이쁨)
+  const hoverStyle = `<style>.awb-row{transition:all .15s ease;}.awb-row:hover{border-color:${accent}!important;box-shadow:0 6px 16px rgba(0,0,0,.13)!important;transform:translateY(-1px);}.awb-row:hover .awb-btn{filter:brightness(.9);}.awb-cta{transition:all .15s ease;}.awb-cta:hover{filter:brightness(.9);transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,.22)!important;}</style>`;
+  parts.push(hoverStyle);
+  const adUnit = opts.adEnabled && opts.adCode
+    ? `<div class="autowriter-ad" style="margin:1.6em 0;text-align:center;">${opts.adCode}</div>`
+    : "";
+
+  if (article.today) {
+    parts.push(`<p style="${S.updated}">최종 업데이트: ${esc(article.today)}</p>`);
+  }
+
+  const blocks = article.blocks || [];
+  // 첫 H2 위치(도입부 뒤)와 중간 지점에 광고 삽입
+  let firstH2 = -1;
+  for (let i = 0; i < blocks.length; i++) {
+    if (blocks[i].type === "heading" && (blocks[i].level || 2) === 2) { firstH2 = i; break; }
+  }
+  const mid = Math.floor(blocks.length / 2);
+
+  for (let i = 0; i < blocks.length; i++) {
+    if (adUnit && i === firstH2) parts.push(adUnit);
+    parts.push(renderBlock(blocks[i], cfg));
+    if (adUnit && i === mid && mid !== firstH2 && mid > firstH2) parts.push(adUnit);
+  }
+
+  if (adUnit) parts.push(adUnit); // FAQ 앞 광고
+  parts.push(renderFaq(article.faq));
+
+  if (article.authorBio) {
+    parts.push(`<div style="${S.calloutBase}${S.callout.info}"><strong>작성자</strong><br/>${inline(article.authorBio)}</div>`);
+  }
+
+  if (opts.sources && opts.sources.length) {
+    const lis = opts.sources
+      .filter((s) => s && s.link)
+      .map((s) => `<li style="margin:4px 0;"><a href="${esc(s.link)}" target="_blank" rel="noopener" style="color:#2563eb;">${esc(s.title || s.link)}</a></li>`)
+      .join("");
+    if (lis) parts.push(`<div style="margin-top:1.4em;padding-top:0.8em;border-top:1px solid #eee;"><strong style="font-size:.9em;color:#555;">참고 자료</strong><ul style="padding-left:1.2em;font-size:.85em;color:#666;margin:.4em 0;">${lis}</ul></div>`);
+  }
+
+  if (article.relatedKeywords?.length) {
+    parts.push(`<p style="${S.related}">연관 검색어: ${article.relatedKeywords.map(esc).join(", ")}</p>`);
+  }
+
+  const schema = buildSchema(article);
+  const schemaScript = `<script type="application/ld+json">${JSON.stringify(schema)}</script>`;
+
+  return {
+    html: parts.join("\n"),
+    htmlWithSchema: parts.join("\n") + "\n" + schemaScript,
+    schema
+  };
+}
+
+// 미리보기용 전체 문서 (iframe srcdoc)
+export function buildPreviewDoc(title, bodyHtml) {
+  return `<!doctype html><html><head><meta charset="utf-8"/>
+<style>body{font-family:-apple-system,'Malgun Gothic',sans-serif;max-width:720px;margin:0 auto;padding:20px;color:#222;}
+h1{font-size:1.8em;line-height:1.3;margin:0 0 0.6em;}</style></head>
+<body><h1>${esc(title)}</h1>${bodyHtml}</body></html>`;
+}

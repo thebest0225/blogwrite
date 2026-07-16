@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>블로그 오토라이터</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="apptitle">✍️ 블로그 오토라이터</div>
+    <button class="icon-btn" id="openOptions" title="설정">⚙️ 설정</button>
+  </header>
+
+  <div id="apiWarn" class="warn hidden">
+    ⚠️ 서버에 KIE API 키가 설정되지 않았습니다. <code>server/.env</code> 의 <code>KIE_API_KEY</code> 를 확인하세요.
+  </div>
+
+  <main class="wrap">
+    <!-- 왼쪽: 입력/컨트롤 -->
+    <section class="col col-controls">
+      <div class="modebar" id="modeBar">
+        <button class="mode active" data-mode="blogger">블로거 메인</button>
+        <button class="mode" data-mode="naver">네이버</button>
+        <button class="mode" data-mode="wp">워드프레스</button>
+      </div>
+
+      <details class="history" id="trendBox">
+        <summary>🔥 지금 뜨는 트렌드 (6시간마다 갱신 · 클릭해 주제로)</summary>
+        <div class="row" style="margin-top:8px;align-items:center;">
+          <span id="trendMeta" class="muted" style="flex:1;"></span>
+          <button class="mini" id="trendRefresh">새로고침</button>
+        </div>
+        <div id="trendList" class="history-list"></div>
+      </details>
+
+      <details class="history" id="myPostsBox">
+        <summary>🔗 내 글 보관함 (링크 걸 때 여기서 먼저 찾음)</summary>
+        <div class="row" style="margin-top:8px;">
+          <input type="text" id="myPostSearch" placeholder="보관함 검색 (제목/키워드)" />
+        </div>
+        <div class="row" style="margin-top:6px;">
+          <input type="text" id="myPostTitle" placeholder="글 제목/키워드" />
+        </div>
+        <div class="row" style="margin-top:6px;">
+          <input type="text" id="myPostUrl" placeholder="https://내글주소" />
+          <button class="mini" id="myPostAdd">추가</button>
+        </div>
+        <div id="myPostsCount" class="hist-count"></div>
+        <div id="myPostsList" class="history-list" style="margin-top:6px;"></div>
+      </details>
+
+      <label class="field">
+        <span>원본 글 (claude.ai 등에서 작성해 붙여넣기 · 텍스트/HTML 모두 가능)</span>
+        <textarea id="originalText" rows="9" placeholder="정확한 원본 글을 여기에 붙여넣으세요. 이 툴이 디자인·보강·변형·썸네일·링크를 담당합니다."></textarea>
+      </label>
+
+      <label class="field hidden" id="bloggerUrlRow">
+        <span>메인(블로거) 글 URL — 이 글로 유입시킴</span>
+        <input type="text" id="bloggerUrl" placeholder="https://blog.내주소.com/글주소 (비우면 설정의 내 블로그 주소)" />
+      </label>
+
+      <label class="field">
+        <span>키워드 (선택 · SEO/링크 초점)</span>
+        <input type="text" id="keyword" placeholder="예: 참교육 김무열 / 로봇청소기 추천" />
+      </label>
+
+      <div class="imgrow">
+        <label class="check"><input type="checkbox" id="genImages" /><span>이미지 생성</span></label>
+        <label class="imgcount"><span>개수</span>
+          <select id="imgCount">
+            <option value="1">1 (썸네일만)</option><option value="2">2</option>
+            <option value="3">3</option><option value="4">4</option>
+          </select>
+        </label>
+        <label class="imgcount"><span>비율</span>
+          <select id="imgAspect">
+            <option value="4:3">4:3</option><option value="16:9">16:9</option><option value="1:1">1:1</option>
+          </select>
+        </label>
+      </div>
+
+      <button class="primary" id="generateBtn">✨ 블로거 메인 완성</button>
+      <div id="status" class="status hidden"></div>
+    </section>
+
+    <!-- 오른쪽: 결과/미리보기 -->
+    <section class="col col-result">
+      <section id="result" class="result hidden">
+        <div class="result-head">
+          <strong>미리보기</strong>
+          <div class="result-actions">
+            <button class="mini primary-mini" id="copyBtn">📋 HTML 복사</button>
+          </div>
+        </div>
+        <div class="result-actions wp-actions hidden" id="wpActions">
+          <button class="mini" id="wpDraftBtn">WP 초안저장</button>
+          <button class="mini primary-mini" id="wpPublishBtn">WP 바로발행</button>
+        </div>
+        <div class="meta-line" id="metaLine"></div>
+        <iframe id="preview" class="preview"></iframe>
+
+        <details class="imgedit hidden" id="imgEditBox">
+          <summary>🖌️ 이미지 수정 / 다시 생성</summary>
+          <div id="imgEditList" class="imgedit-list"></div>
+        </details>
+      </section>
+      <div id="resultEmpty" class="result-empty">
+        <div>왼쪽에 원본 글을 붙여넣고 <b>완성</b>을 누르면<br/>여기에 미리보기가 나타납니다.</div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 설정 모달 -->
+  <dialog id="optionsDialog" class="optdlg">
+    <form method="dialog" class="optform" id="optForm">
+      <h3>설정</h3>
+      <p class="muted">API 키는 서버 <code>.env</code> 에서 관리됩니다. 여기서는 비민감 값만 저장됩니다.</p>
+
+      <label class="field"><span>글 생성 모델</span>
+        <select id="optChatModel">
+          <option value="claude-sonnet-5">Claude Sonnet 5 (기본·빠름)</option>
+          <option value="claude-opus-4-8">Claude Opus 4.8 (고품질·느림)</option>
+        </select>
+      </label>
+      <div class="grid2">
+        <label class="field"><span>썸네일 방식</span>
+          <select id="optThumbMode">
+            <option value="ai_full">AI 통짜(한글까지 생성)</option>
+            <option value="overlay">AI배경+텍스트 오버레이</option>
+            <option value="off">끄기</option>
+          </select>
+        </label>
+        <label class="field"><span>이미지 해상도</span>
+          <select id="optImgRes"><option value="1K">1K</option><option value="2K">2K</option><option value="4K">4K</option></select>
+        </label>
+      </div>
+      <div class="grid2">
+        <label class="field"><span>링크 처리</span>
+          <select id="optLinkMode"><option value="search">검색결과로 안전</option><option value="model">모델 URL 사용</option></select>
+        </label>
+        <label class="field"><span>오버레이 액센트</span>
+          <input type="color" id="optAccent" value="#ff2d55" />
+        </label>
+      </div>
+      <label class="field"><span>내 블로그 주소 (우선 링크·유입 대상)</span>
+        <input type="text" id="optMyBlog" placeholder="https://blog.example.com" />
+      </label>
+      <div class="grid2">
+        <label class="field"><span>기본 톤</span><input type="text" id="optTone" /></label>
+        <label class="field"><span>대상 독자</span><input type="text" id="optAudience" /></label>
+      </div>
+      <label class="field"><span>저자 소개 (E-E-A-T · 글 하단 삽입)</span>
+        <textarea id="optAuthorBio" rows="2"></textarea>
+      </label>
+      <label class="field"><span>썸네일 스타일 지시 (비우면 기본값)</span>
+        <textarea id="optThumbStyle" rows="3" placeholder="비우면 내장 기본 스타일 사용"></textarea>
+      </label>
+      <label class="check"><input type="checkbox" id="optAdEnabled" /><span>애드센스 광고 자동 삽입</span></label>
+      <label class="field"><span>광고 유닛 HTML</span>
+        <textarea id="optAdCode" rows="2" placeholder="<ins class=adsbygoogle ...></ins>"></textarea>
+      </label>
+
+      <div class="optbtns">
+        <button type="button" class="mini" id="optClose">닫기</button>
+        <button type="button" class="mini primary-mini" id="optSave">저장</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

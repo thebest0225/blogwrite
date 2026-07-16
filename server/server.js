@@ -73,10 +73,18 @@ app.get("/api/keywords", async (req, res) => {
   if (!seed) return res.json({ keywords: [] });
   const mods = ["", "추천", "방법", "후기", "비교", "순위", "뜻", "이유", "단점", "실시간", "정리", "총정리", "2026"];
   const qs = [...new Set(mods.map((m) => (m ? `${seed} ${m}` : seed)))];
+  const UA = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36", "Accept": "application/json,*/*" };
+  // 깨진(모지바케) 결과 필터: 대체문자/고립 자모 포함 시 제외
+  const isClean = (s) => typeof s === "string" && s.length > 1 && !/[�ᄀ-ᇿ㄰-㆏]/.test(s);
   const found = new Set();
   await Promise.all(qs.map(async (q) => {
-    try { const r = await fetch(`https://suggestqueries.google.com/complete/search?client=firefox&hl=ko&gl=kr&q=${encodeURIComponent(q)}`); (JSON.parse(await r.text())[1] || []).forEach((k) => found.add(k)); } catch {}
-    try { const r = await fetch(`https://ac.search.naver.com/nx/ac?q=${encodeURIComponent(q)}&st=100&r_format=json&r_enc=UTF-8&ans=2`); ((JSON.parse(await r.text()).items?.[0]) || []).forEach((row) => found.add(Array.isArray(row) ? row[0] : row)); } catch {}
+    try { const r = await fetch(`https://suggestqueries.google.com/complete/search?client=firefox&hl=ko&gl=kr&q=${encodeURIComponent(q)}`, { headers: UA }); (JSON.parse(await r.text())[1] || []).forEach((k) => { if (isClean(k)) found.add(k); }); } catch {}
+    try {
+      const r = await fetch(`https://ac.search.naver.com/nx/ac?q=${encodeURIComponent(q)}&st=100&r_format=json&r_enc=UTF-8&r_unicode=0&ans=2`, { headers: UA });
+      const buf = new Uint8Array(await r.arrayBuffer());
+      const txt = new TextDecoder("utf-8").decode(buf);
+      ((JSON.parse(txt).items?.[0]) || []).forEach((row) => { const k = Array.isArray(row) ? row[0] : row; if (isClean(k)) found.add(k); });
+    } catch {}
   }));
   res.json({ keywords: [...found].filter(Boolean).slice(0, 60) });
 });
@@ -129,9 +137,43 @@ app.post("/api/wp", async (req, res) => {
 // ---- 기록/보관함 저장소 ----
 app.get("/api/store", (req, res) => res.json({ records: loadStore().reverse() }));
 app.post("/api/store", (req, res) => { const a = loadStore(); a.push({ date: new Date().toISOString(), ...req.body }); saveStore(a); res.json({ ok: true }); });
+// 보관함 항목 삭제 (url 기준)
+app.post("/api/store/delete", (req, res) => {
+  const { url } = req.body || {};
+  if (!url) return res.json({ ok: false });
+  saveStore(loadStore().filter((r) => r.url !== url));
+  res.json({ ok: true });
+});
+
+// ---- 비민감 설정 저장 (settings.json) ----
+const SETTINGS = path.join(__dirname, "settings.json");
+const SETTINGS_DEFAULTS = {
+  kieChatModel: "claude-sonnet-5",
+  imageResolution: "1K",
+  thumbnailMode: "ai_full",     // ai_full | overlay | off
+  thumbnailStylePrompt: "",     // 비우면 프론트 기본값 사용
+  overlayAccent: "#ff2d55",
+  linkMode: "search",           // search | model
+  myBlogUrl: "",
+  defaultTone: "친근하고 신뢰감 있는",
+  defaultAudience: "관련 정보를 처음 찾아보는 일반 독자",
+  authorBio: "",
+  adEnabled: false,
+  adCode: "",
+  internalLinks: false,
+  generateImages: true,
+  imageCount: 1
+};
+const loadSettings = () => { try { return { ...SETTINGS_DEFAULTS, ...JSON.parse(fs.readFileSync(SETTINGS, "utf8")) }; } catch { return { ...SETTINGS_DEFAULTS }; } };
+app.get("/api/settings", (req, res) => res.json(loadSettings()));
+app.post("/api/settings", (req, res) => {
+  const merged = { ...loadSettings(), ...(req.body || {}) };
+  fs.writeFileSync(SETTINGS, JSON.stringify(merged, null, 2));
+  res.json({ ok: true, settings: merged });
+});
 
 // (선택) 비밀 설정이 아닌 프론트용 기본값 제공
-app.get("/api/config", (req, res) => res.json({ wpEnabled: !!WP_SITE, naverEnabled: !!NAVER_ID }));
+app.get("/api/config", (req, res) => res.json({ kieEnabled: !!KIE, wpEnabled: !!WP_SITE, naverEnabled: !!NAVER_ID }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`블로그 오토라이터 서버: http://localhost:${PORT}`));
