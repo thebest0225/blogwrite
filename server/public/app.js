@@ -44,6 +44,9 @@ const storeList = () => apiJson("/api/store").then((j) => j.records || []);
 const storeAdd = (rec) => apiJson("/api/store", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rec) }).catch(() => {});
 const storeDelete = (url) => apiJson("/api/store/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) }).catch(() => {});
 const wpCreatePost = ({ title, content, status }) => apiJson("/api/wp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, content, status }) });
+const draftsList = () => apiJson("/api/drafts").then((j) => j.drafts || []);
+const draftDelete = (id) => apiJson("/api/drafts/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).catch(() => {});
+const draftStatus = (id, status) => apiJson("/api/drafts/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }) }).catch(() => {});
 
 async function getSettings() { try { return { ...DEFAULTS, ...(await apiJson("/api/settings")) }; } catch { return { ...DEFAULTS }; } }
 async function saveSettings(patch) { await apiJson("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }); }
@@ -72,10 +75,40 @@ async function init() {
   $("myPostSearch").addEventListener("input", () => renderMyPosts());
   $("trendRefresh").addEventListener("click", () => renderTrends(true));
   $("trendBox").addEventListener("toggle", (e) => { if (e.target.open) renderTrends(false); });
+  $("draftsRefresh").addEventListener("click", renderDrafts);
+  $("draftsBox").addEventListener("toggle", (e) => { if (e.target.open) renderDrafts(); });
   $("optClose").addEventListener("click", () => $("optionsDialog").close());
   $("optSave").addEventListener("click", onSaveOptions);
 
   renderMyPosts();
+  renderDrafts();
+}
+
+// ---------- 초안함 (MCP/Claude로 받은 초안) ----------
+async function renderDrafts() {
+  const box = $("draftsList"); if (!box) return;
+  let drafts = []; try { drafts = await draftsList(); } catch {}
+  const newCnt = drafts.filter((d) => d.status === "new").length;
+  $("draftsCount").textContent = drafts.length ? `총 ${drafts.length}개 · 새 초안 ${newCnt}개` : "받은 초안이 없습니다. (Claude/MCP에서 전송)";
+  box.innerHTML = "";
+  if (!drafts.length) { box.innerHTML = '<div class="hist-empty">초안이 없습니다. Claude에서 초안을 작성해 전송하면 여기 쌓입니다.</div>'; return; }
+  for (const d of drafts.slice(0, 40)) {
+    const row = document.createElement("div"); row.className = "hist-item";
+    const b = document.createElement("button"); b.className = "hist-load";
+    const tag = d.status === "used" ? "✅ " : (d.status === "new" ? "🆕 " : "");
+    b.textContent = tag + (d.title || "(제목없음)") + (d.keyword ? ` · ${d.keyword}` : "");
+    b.title = "클릭하면 원본 글로 불러옵니다";
+    b.addEventListener("click", () => loadDraft(d));
+    const del = document.createElement("button"); del.className = "hist-del"; del.textContent = "✕";
+    del.addEventListener("click", async (e) => { e.preventDefault(); await draftDelete(d.id); renderDrafts(); });
+    row.appendChild(b); row.appendChild(del); box.appendChild(row);
+  }
+}
+async function loadDraft(d) {
+  $("originalText").value = d.content || "";
+  if (d.status === "new") { await draftStatus(d.id, "used"); renderDrafts(); }
+  setStatus(`📥 초안 "${d.title}" 불러옴. ① 워드프레스부터 생성하세요.`);
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function setStatus(msg, isError = false) { const el = $("status"); el.textContent = msg; el.classList.remove("hidden"); el.classList.toggle("error", isError); }

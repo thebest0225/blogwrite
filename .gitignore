@@ -14,3 +14,4 @@ node_modules/
 # OS
 Thumbs.db
 .DS_Store
+server/drafts.json

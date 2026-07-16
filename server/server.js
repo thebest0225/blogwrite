@@ -51,9 +51,12 @@ const NAVER_ID = process.env.NAVER_CLIENT_ID, NAVER_SECRET = process.env.NAVER_C
 const WP_SITE = process.env.WP_SITE, WP_USER = process.env.WP_USER, WP_PASS = process.env.WP_APP_PASSWORD;
 const KIE_BASE = "https://api.kie.ai";
 const STORE = path.join(__dirname, "records.json");
+const DRAFTS = path.join(__dirname, "drafts.json");   // MCP로 받은 초안함 (MCP 서버와 공유)
 
 const loadStore = () => { try { return JSON.parse(fs.readFileSync(STORE, "utf8")); } catch { return []; } };
 const saveStore = (a) => fs.writeFileSync(STORE, JSON.stringify(a));
+const loadDrafts = () => { try { return JSON.parse(fs.readFileSync(DRAFTS, "utf8")); } catch { return []; } };
+const saveDrafts = (a) => fs.writeFileSync(DRAFTS, JSON.stringify(a));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const kieHeaders = () => ({ Authorization: `Bearer ${KIE}`, "Content-Type": "application/json" });
 
@@ -201,6 +204,25 @@ app.post("/api/store/delete", (req, res) => {
   const { url } = req.body || {};
   if (!url) return res.json({ ok: false });
   saveStore(loadStore().filter((r) => r.url !== url));
+  res.json({ ok: true });
+});
+
+// ---- 초안함 (MCP로 받은 초안 리스트) ----
+app.get("/api/drafts", (req, res) => res.json({ drafts: loadDrafts().slice().reverse() }));
+app.post("/api/drafts", (req, res) => {
+  const d = req.body || {};
+  const rec = { id: "d" + Date.now().toString(36), date: new Date().toISOString(), status: "new", title: d.title || "(제목없음)", content: d.content || "", keyword: d.keyword || "", source: d.source || "web" };
+  const a = loadDrafts(); a.push(rec); saveDrafts(a);
+  res.json({ ok: true, draft: rec });
+});
+app.post("/api/drafts/delete", (req, res) => {
+  const { id } = req.body || {};
+  saveDrafts(loadDrafts().filter((r) => r.id !== id));
+  res.json({ ok: true });
+});
+app.post("/api/drafts/status", (req, res) => {
+  const { id, status } = req.body || {};
+  const a = loadDrafts(); const r = a.find((x) => x.id === id); if (r) { r.status = status; saveDrafts(a); }
   res.json({ ok: true });
 });
 

@@ -39,6 +39,15 @@
         </div>
       </div>
 
+      <details class="history" id="draftsBox" open>
+        <summary>📥 초안함 (Claude/MCP로 받은 초안 · 클릭 시 원본으로 불러오기)</summary>
+        <div class="row" style="margin-top:8px;align-items:center;">
+          <span id="draftsCount" class="muted" style="flex:1;"></span>
+          <button class="mini" id="draftsRefresh">새로고침</button>
+        </div>
+        <div id="draftsList" class="history-list"></div>
+      </details>
+
       <details class="history" id="trendBox">
         <summary>🔥 지금 뜨는 트렌드 (참고용 · 클릭 시 주제 복사)</summary>
         <div class="row" style="margin-top:8px;align-items:center;">
