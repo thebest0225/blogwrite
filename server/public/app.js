@@ -243,11 +243,11 @@ async function generate(target) {
     await gatherRelatedLinks(keyword);
     const built = buildPromptFor(target, keyword);
     setStatus(`[${LABEL[target]}] 글 작성 중… (15~60초)`);
-    let content = await chatComplete({ model: settings.kieChatModel, system: built.system, user: built.user, maxTokens: 20000 });
+    let content = await chatComplete({ model: settings.kieChatModel, system: built.system, user: built.user, maxTokens: 32000 });
     let article = tryParse(content);
     if (!article) {
       setStatus(`[${LABEL[target]}] 형식 재요청 중…`);
-      content = await chatComplete({ model: settings.kieChatModel, system: built.system, user: built.user + "\n\n(JSON이 끊기지 않게 위 형식의 JSON 객체 하나로만 완결해줘.)", maxTokens: 20000 });
+      content = await chatComplete({ model: settings.kieChatModel, system: built.system, user: built.user + "\n\n(JSON이 끊기지 않게 위 형식의 JSON 객체 하나로만 완결해줘.)", maxTokens: 32000 });
       article = tryParse(content);
     }
     if (!article) throw new Error("생성 결과 JSON 파싱 실패. 원본을 조금 줄이거나 다시 시도하세요.\n" + content.slice(0, 140));
