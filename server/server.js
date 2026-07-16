@@ -56,7 +56,11 @@ async function kieChat({ system, user, maxTokens, temperature, model, prefillJso
     body: JSON.stringify({ model: model || CHAT_MODEL, system, messages, max_tokens: maxTokens, temperature, stream: false })
   });
   const t = await r.text();
-  let j; try { j = JSON.parse(t); } catch { throw new Error(t.slice(0, 300)); }
+  // KIE 게이트웨이(Cloudflare) 에러 페이지/비정상 응답 감지 → 재시도 대상
+  if (!r.ok || /^\s*<(?:!doctype|html)/i.test(t)) {
+    throw new Error(`KIE 게이트웨이 오류(${r.status})`);
+  }
+  let j; try { j = JSON.parse(t); } catch { throw new Error("KIE 응답 형식 오류"); }
   const data = j.data && (j.data.content || j.data.choices) ? j.data : j;
   let content = Array.isArray(data.content) ? data.content.filter((b) => b.type === "text").map((b) => b.text).join("") : "";
   if (!content) content = data?.choices?.[0]?.message?.content || "";
@@ -64,16 +68,18 @@ async function kieChat({ system, user, maxTokens, temperature, model, prefillJso
   return content;
 }
 app.post("/api/chat", async (req, res) => {
-  try {
-    const { system, user, maxTokens = 32000, temperature = 0.8, model, prefillJson = true } = req.body;
-    let content = await kieChat({ system, user, maxTokens, temperature, model, prefillJson });
-    // 간헐적 빈 응답 방어: 1회 재시도
-    if (!content || !content.trim()) {
-      await sleep(800);
+  const { system, user, maxTokens = 16000, temperature = 0.8, model, prefillJson = true } = req.body;
+  let content = "", lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) await sleep(1200);
+    try {
       content = await kieChat({ system, user, maxTokens, temperature, model, prefillJson });
-    }
-    res.json({ content });
-  } catch (e) { res.status(500).json({ error: String(e) }); }
+      if (content && content.trim()) break;
+      lastErr = new Error("빈 응답");
+    } catch (e) { lastErr = e; }
+  }
+  if (content && content.trim()) return res.json({ content });
+  res.status(502).json({ error: "AI 응답 실패(잠시 후 다시 시도해 주세요). " + (lastErr ? String(lastErr.message || lastErr).slice(0, 120) : "") });
 });
 
 // ---- 이미지 (KIE jobs) ----
