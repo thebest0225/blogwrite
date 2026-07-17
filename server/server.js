@@ -298,6 +298,8 @@ app.get("/api/config", (req, res) => {
 });
 // 생성 대상 계정 목록(계정마다 각각 다른 글 생성)
 app.get("/api/accounts", (req, res) => res.json({ accounts: DB.accountsForGeneration(req.userId) }));
+// 발행 자산(목적지 선택용: url+title+excerpt)
+app.get("/api/assets", (req, res) => res.json({ assets: DB.listAssets(req.userId) }));
 
 // ---- 기존 JSON → SQLite 1회 이관 (user 1) + .env WP를 기본 목적지로 ----
 function migrateOnce() {

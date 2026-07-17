@@ -67,6 +67,7 @@ async function init() {
   document.querySelectorAll(".nav-item").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
   $("goAccounts")?.addEventListener("click", (e) => { e.preventDefault(); showView("accounts"); });
   $("genAll").addEventListener("click", generateAll);
+  document.querySelectorAll(".mode-tab").forEach((b) => b.addEventListener("click", () => setGenMode(b.dataset.mode)));
   $("editToggle").addEventListener("click", toggleEdit);
   $("copyBtn").addEventListener("click", onCopy);
   $("wpDraftBtn").addEventListener("click", () => wpPublish("draft"));
@@ -101,7 +102,7 @@ function showView(name) {
   else if (name === "accounts") renderAccounts();
   else if (name === "assets") renderMyPosts();
   else if (name === "schedule") renderSchedules();
-  else if (name === "new") { refreshAccounts(); }
+  else if (name === "new") { setGenMode(genMode); }
   else if (name === "settings") populateSettings();
   window.scrollTo({ top: 0 });
 }
@@ -109,9 +110,33 @@ async function updateInboxBadge() {
   try { const c = (await apiJson("/api/config")).newDrafts || 0; const b = $("inboxBadge"); b.textContent = c; b.classList.toggle("hidden", !c); } catch {}
 }
 let accounts = [];
+let genMode = "destination";   // destination | cushion
+const isDestForMode = (a) => { const r = a.role || "destination"; return r === "destination" || r === "both"; };
+const isCushForMode = (a) => { const r = a.role || "destination"; return r === "cushion" || r === "both"; };
+function accountsForMode() { return accounts.filter((a) => genMode === "destination" ? isDestForMode(a) : isCushForMode(a)); }
 async function refreshAccounts() {
   try { accounts = await apiJson("/api/accounts").then((j) => j.accounts || []); } catch { accounts = []; }
-  const el = $("genAccCount"); if (el) el.textContent = String(accounts.length);
+  const el = $("genAccCount"); if (el) el.textContent = String(accountsForMode().length);
+}
+function setGenMode(mode) {
+  genMode = mode;
+  document.querySelectorAll(".mode-tab").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+  const cushion = mode === "cushion";
+  $("cushDestRow").classList.toggle("hidden", !cushion);
+  $("modeAccLabel").textContent = cushion ? "쿠션" : "목적지";
+  $("genAll").textContent = cushion ? "✨ 쿠션 생성" : "✨ 목적지 생성";
+  $("modeHelp").innerHTML = cushion
+    ? "발행된 <b>목적지 글</b>을 고르면, 원본+목적지를 함께 참고해 새 정보·연관검색어를 더한 <b>쿠션</b>을 계정별로 생성합니다."
+    : "원본으로 <b>목적지 계정</b>에 완성글을 생성합니다. 생성 후 작업보드에서 발행하면 URL이 생겨요.";
+  refreshAccounts();
+  if (cushion) loadCushDests();
+}
+let cushAssets = [];
+async function loadCushDests() {
+  try { cushAssets = await apiJson("/api/assets").then((j) => j.assets || []); } catch { cushAssets = []; }
+  const sel = $("cushDest"); sel.innerHTML = "";
+  const o0 = document.createElement("option"); o0.value = ""; o0.textContent = cushAssets.length ? "— 발행된 목적지 선택 —" : "(발행된 목적지 없음 · 아래에 URL 직접 입력)"; sel.appendChild(o0);
+  for (const a of cushAssets) { const o = document.createElement("option"); o.value = a.url; o.textContent = (a.title || a.url).slice(0, 60); sel.appendChild(o); }
 }
 
 // ---------- 계정 관리 ----------
@@ -405,10 +430,11 @@ function destUrlForGen() {
   const d = accounts.find((a) => isDestRole(a));
   return getDestUrl() || (d && d.site_url) || "";
 }
-function promptForAccount(acc, keyword, variant, destUrl) {
+function promptForAccount(acc, keyword, variant, destUrl, reference) {
   const sourceText = $("originalText").value.trim();
-  const common = { keyword, audience: settings.defaultAudience, tone: settings.defaultTone, authorBio: settings.authorBio, today: todayStr(), imageCount: parseInt($("imgCount").value, 10) || 1, variant };
-  if (isDestRole(acc)) return buildBloggerMain({ ...common, sourceText, internalLinks: [] });
+  const common = { keyword, audience: settings.defaultAudience, tone: settings.defaultTone, authorBio: settings.authorBio, today: todayStr(), imageCount: parseInt($("imgCount").value, 10) || 1, variant, reference };
+  // 목적지 모드 = 목적지 글, 쿠션 모드 = 쿠션 글 (계정 역할이 겸용이어도 현재 모드 기준)
+  if (genMode === "destination") return buildBloggerMain({ ...common, sourceText, internalLinks: [] });
   return buildCushionPrompt(acc.platform === "naver" ? "naver" : "blogger", { ...common, sourceText, bloggerUrl: destUrl });
 }
 
@@ -493,7 +519,7 @@ function buildHtmlForAccount(acc, article, keyword, destUrl) {
 async function finalizeForAccount(acc, article, keyword, destUrl) {
   article.today = todayStr(); article.authorBio = settings.authorBio; article.keyword = keyword;
   const isNaver = acc.platform === "naver";
-  if (isDestRole(acc)) ensureTopLinkcard("destination", article, keyword, lastMyPosts, "");
+  if (genMode === "destination") ensureTopLinkcard("destination", article, keyword, lastMyPosts, "");
   else if (isNaver) ensureNaverFunnel(article, keyword, lastMyPosts, destUrl);
   else ensureTopLinkcard("cushion", article, keyword, lastMyPosts, destUrl);
   if (!isNaver) embedYouTube(article);
@@ -515,28 +541,38 @@ async function generateAll() {
   if (!config.kieEnabled && !config.claudeEnabled) { setStatus("생성 엔진(Claude/KIE) 키가 없습니다. 설정에서 입력하세요.", true); return; }
   if (!$("originalText").value.trim()) { setStatus("원본 글을 붙여넣거나 초안함에서 선택하세요.", true); return; }
   await refreshAccounts();
-  if (!accounts.length) { setStatus("먼저 '계정 관리'에서 목적지/쿠션 계정을 등록하세요.", true); showView("accounts"); return; }
+  const accts = accountsForMode();
+  if (!accts.length) {
+    setStatus(genMode === "destination" ? "먼저 '계정 관리'에서 목적지 계정을 등록하세요." : "먼저 '계정 관리'에서 쿠션 계정(블로거/네이버)을 등록하세요.", true);
+    showView("accounts"); return;
+  }
+  let destUrl = "", reference = "";
+  if (genMode === "cushion") {
+    destUrl = ($("cushDest").value || $("bloggerUrl").value.trim() || destUrlForGen());
+    if (!destUrl) { setStatus("유입시킬 목적지 글을 선택하거나 URL을 입력하세요.", true); return; }
+    const asset = (cushAssets || []).find((a) => a.url === destUrl);
+    if (asset) reference = `[유입 목적지 글: ${asset.title || ""}]\n${asset.excerpt || asset.summary || ""}`.trim();
+  }
   const keyword = deriveTopic();
   $("genAll").disabled = true;
   try {
     await gatherRelatedLinks(keyword);
-    const destUrl = destUrlForGen();
-    const gk = (a) => (isDestRole(a) ? "d" : "c") + ":" + a.platform;
-    const groups = {}; accounts.forEach((a) => { (groups[gk(a)] = groups[gk(a)] || []).push(a); });
+    const gk = (a) => genMode + ":" + a.platform;
+    const groups = {}; accts.forEach((a) => { (groups[gk(a)] = groups[gk(a)] || []).push(a); });
     const idxIn = {}; let done = 0;
-    for (const acc of accounts) {
+    for (const acc of accts) {
       const k = gk(acc); idxIn[k] = (idxIn[k] || 0) + 1;
       const variant = { index: idxIn[k], total: groups[k].length };
-      setStatus(`[${acc.name}] 생성 중… (${++done}/${accounts.length})`);
+      setStatus(`[${acc.name}] 생성 중… (${++done}/${accts.length})`);
       let article;
-      try { article = await chatArticle(promptForAccount(acc, keyword, variant, destUrl)); }
+      try { article = await chatArticle(promptForAccount(acc, keyword, variant, destUrl, reference)); }
       catch (e) { setStatus(`[${acc.name}] 실패: ${e.message}`, true); continue; }
       const html = await finalizeForAccount(acc, article, keyword, destUrl);
-      await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ draft_id: activeDraftId, target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated" }) }).catch(() => {});
+      await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ draft_id: activeDraftId, target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated", role: genMode }) }).catch(() => {});
       await storeAdd({ type: "article", title: article.title || "", keyword, platform: acc.platform });
     }
     if (activeDraftId) { await draftStatus(activeDraftId, "used"); renderDrafts(); }
-    setStatus(`✅ ${accounts.length}개 계정 글 생성 완료. 아래 작업 목록에서 검수·발행하세요.`);
+    setStatus(`✅ ${accts.length}개 ${genMode === "destination" ? "목적지" : "쿠션"} 글 생성 완료. 아래 작업 목록에서 검수·발행하세요.`);
     showView("board");
     await renderWorkList();
     if (workItems[0]) openWork(workItems[0].id);

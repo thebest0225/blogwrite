@@ -59,23 +59,31 @@
         </div>
       </section>
 
-      <!-- 새 글 생성 -->
+      <!-- 새 글 생성 (2단계: 목적지 먼저 → 발행 → 쿠션) -->
       <section class="view hidden" data-view="new">
-        <div class="view-head"><h2>새 글 생성</h2><span class="muted">원본 하나로 등록된 계정마다 각각 다른 글을 생성합니다.</span></div>
+        <div class="view-head"><h2>새 글 생성</h2><span class="muted">① 목적지 먼저 만들어 발행 → ② 그 URL로 쿠션 생성</span></div>
+        <div class="mode-tabs">
+          <button class="mode-tab active" data-mode="destination">① 목적지 만들기</button>
+          <button class="mode-tab" data-mode="cushion">② 쿠션 만들기</button>
+        </div>
         <div class="card">
-          <label class="field"><span>원본 글 <span class="muted">— claude.ai 등에서 작성(링크·출처 포함). 초안함에서 불러올 수도 있어요.</span></span>
-            <textarea id="originalText" rows="10" placeholder="상세한 원본 글을 붙여넣으세요."></textarea>
+          <p class="muted" id="modeHelp">원본으로 <b>목적지 계정</b>에 완성글을 생성합니다. 생성 후 작업보드에서 발행하면 URL이 생겨요.</p>
+          <label class="field"><span>원본 글 <span class="muted">— claude.ai 등에서 작성. 초안함에서 불러올 수도 있어요.</span></span>
+            <textarea id="originalText" rows="9" placeholder="상세한 원본 글을 붙여넣으세요."></textarea>
           </label>
-          <label class="field"><span>목적지(워드프레스) URL <span class="muted">— 쿠션 유입 대상. WP 발행하면 자동 세팅</span></span>
-            <input type="text" id="bloggerUrl" placeholder="비우면 기본 목적지·최근 발행글 자동" />
-          </label>
+          <!-- 쿠션 모드 전용: 유입시킬 목적지 선택 -->
+          <div id="cushDestRow" class="field hidden">
+            <span>유입시킬 목적지 글 <span class="muted">— 발행된 목적지를 고르거나 URL 직접 입력</span></span>
+            <select id="cushDest"></select>
+            <input type="text" id="bloggerUrl" placeholder="또는 목적지 URL 직접 입력 (https://...)" style="margin-top:6px;" />
+          </div>
           <div class="imgrow">
             <label class="check"><input type="checkbox" id="genImages" /><span>이미지 생성</span></label>
             <label class="imgcount"><span>개수</span><select id="imgCount"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
             <label class="imgcount"><span>썸네일 비율</span><select id="imgAspect"><option value="4:3">4:3</option><option value="16:9">16:9</option><option value="1:1">1:1</option></select></label>
           </div>
-          <p class="muted"><b id="genAccCount">0</b>개 계정에 각각 다른 글을 생성합니다 (목적지→쿠션 순). <a href="#" id="goAccounts">계정 관리 →</a></p>
-          <button class="primary" id="genAll">✨ 계정별 전체 생성</button>
+          <p class="muted"><b id="genAccCount">0</b>개 <span id="modeAccLabel">목적지</span> 계정에 각각 다른 글을 생성합니다. <a href="#" id="goAccounts">계정 관리 →</a></p>
+          <button class="primary" id="genAll">✨ 목적지 생성</button>
         </div>
         <details class="card"><summary class="card-title" style="cursor:pointer;">🔥 지금 뜨는 트렌드 <span class="muted">— 클릭 시 복사</span></summary>
           <div class="row" style="margin-top:8px;align-items:center;"><span id="trendMeta" class="muted" style="flex:1;"></span><button class="mini" id="trendRefresh">새로고침</button></div>
