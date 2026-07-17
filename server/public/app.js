@@ -88,6 +88,10 @@ async function init() {
   $("copyDraftPrompt").addEventListener("click", copyDraftPromptText);
   document.querySelectorAll(".mode-tab").forEach((b) => b.addEventListener("click", () => setGenMode(b.dataset.mode)));
   $("editToggle").addEventListener("click", toggleEdit);
+  $("editor").addEventListener("dragover", (e) => { if (editMode) { e.preventDefault(); $("editor").classList.add("ied-dragover"); } });
+  $("editor").addEventListener("dragleave", () => $("editor").classList.remove("ied-dragover"));
+  $("editor").addEventListener("drop", onEditorDrop);
+  $("editor").addEventListener("paste", onEditorPaste);
   $("copyBtn").addEventListener("click", onCopy);
   $("wpDraftBtn").addEventListener("click", () => wpPublish("draft"));
   $("wpPublishBtn").addEventListener("click", () => wpPublish("publish"));
@@ -1144,6 +1148,49 @@ function refreshAfterEdit() { rebuildCur(); $("preview").srcdoc = buildPreviewDo
 let _liveT = null;
 function refreshAfterEditLive() { rebuildCur(); clearTimeout(_liveT); _liveT = setTimeout(saveCur, 600); }
 function mkIconBtn(icon, title, fn) { const b = document.createElement("button"); b.className = "ied-btn"; b.title = title; b.innerHTML = `<iconify-icon icon="${icon}"></iconify-icon>`; b.addEventListener("click", (e) => { e.preventDefault(); fn(); }); return b; }
+
+// ----- 편집기 이미지 드래그/붙여넣기 -----
+const fileToDataUrl = (file) => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(file); });
+async function insertDroppedImage({ file, url }) {
+  if (!cur) return;
+  setStatus("이미지 추가 중…");
+  try {
+    let finalUrl = url || "";
+    if (cur.acc.platform === "wordpress") {
+      const body = file ? { destinationId: cur.acc.id, dataUrl: await fileToDataUrl(file) } : { destinationId: cur.acc.id, imageUrl: url };
+      const r = await apiJson("/api/wp-media", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      finalUrl = r.url;
+    } else if (file) {
+      finalUrl = await fileToDataUrl(file);  // 비-WP: 데이터URL(임시). 발행 전 확인 권장
+    }
+    if (!finalUrl) { setStatus("이미지 URL을 가져오지 못했어요.", true); return; }
+    cur.article.blocks.push({ type: "image", slot: "body", resolvedUrl: finalUrl, alt: "" });
+    refreshAfterEdit();
+    setStatus("✅ 이미지를 본문 끝에 추가했어요. 위치는 ↑↓로 옮기세요.");
+  } catch (e) { setStatus("이미지 추가 실패: " + e.message, true); }
+}
+function extractDragUrl(dt) {
+  let url = dt.getData("text/uri-list") || "";
+  if (!url) { const html = dt.getData("text/html"); const m = html && html.match(/<img[^>]+src=["']([^"']+)["']/i); if (m) url = m[1]; }
+  if (!url) { const t = (dt.getData("text/plain") || "").trim(); if (/^https?:\/\/\S+/i.test(t)) url = t; }
+  return (url || "").split("\n")[0].trim();
+}
+async function onEditorDrop(e) {
+  if (!editMode || !cur) return;
+  e.preventDefault(); $("editor").classList.remove("ied-dragover");
+  const dt = e.dataTransfer; if (!dt) return;
+  const file = [...(dt.files || [])].find((f) => f.type.startsWith("image/"));
+  if (file) return insertDroppedImage({ file });
+  const url = extractDragUrl(dt);
+  if (url && /^https?:\/\//i.test(url)) return insertDroppedImage({ url });
+  setStatus("이미지를 인식하지 못했어요. 이미지 파일이나 웹 이미지를 끌어다 놓아 주세요.", true);
+}
+async function onEditorPaste(e) {
+  if (!editMode || !cur) return;
+  const items = [...(e.clipboardData?.items || [])];
+  const img = items.find((it) => it.type.startsWith("image/"));
+  if (img) { const file = img.getAsFile(); if (file) { e.preventDefault(); await insertDroppedImage({ file }); } }
+}
 const ED_TYPE = { paragraph: "문단", heading: "제목", list: "리스트", table: "표", callout: "박스", cta: "버튼", linkcard: "링크카드", image: "이미지", youtube: "영상" };
 function edSummary(b) {
   if (b.type === "youtube") return `[영상] ${b.title || ""} (${ytId(b.url) || "?"})`;
@@ -1158,7 +1205,7 @@ function edSummary(b) {
 function renderEditor() {
   const box = $("editor"); box.innerHTML = "";
   if (!cur) { box.innerHTML = '<div class="ed-hint">작업을 선택하세요.</div>'; return; }
-  const d = document.createElement("div"); d.className = "ed-hint"; d.innerHTML = '미리보기 위에서 바로 편집하세요 — 제목·문단·소제목은 <b>클릭해서 그대로 수정</b>, 블록 사이에 마우스를 올리면 글·버튼·이미지·영상 추가, 우측 아이콘으로 순서변경·삭제·수정.';
+  const d = document.createElement("div"); d.className = "ed-hint"; d.innerHTML = '미리보기 위에서 바로 편집 — 제목·문단·소제목은 <b>클릭해서 수정</b>, 블록 사이 마우스 올려 추가, 우측 아이콘으로 순서변경·삭제. <b>이미지</b>는 인터넷/파일에서 <b>드래그</b>하거나 <b>Ctrl+V 붙여넣기</b>로 넣을 수 있어요(워드프레스는 미디어에 자동 업로드).';
   box.appendChild(d);
   const article = document.createElement("div"); article.className = "ied-doc"; box.appendChild(article);
   // 제목

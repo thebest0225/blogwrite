@@ -279,6 +279,7 @@ input.saved::placeholder { color: #10b981; font-weight: 600; opacity: 1; }
 .ied-view a { pointer-events: none; }
 .ied-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 12px; padding: 10px; background: var(--accent-soft); border-radius: 10px; pointer-events: auto; }
 .ied-form input, .ied-form textarea { flex: 1; min-width: 140px; }
+.editor.ied-dragover { outline: 2px dashed var(--accent); outline-offset: -6px; background: var(--accent-soft); }
 
 /* ===== 미리보기 / 결과 ===== */
 .result-actions { display: flex; gap: 8px; align-items: center; }

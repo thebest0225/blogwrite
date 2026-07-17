@@ -347,6 +347,33 @@ app.post("/api/wp", async (req, res) => {
   } catch (e) { res.status(500).json({ error: "WP 발행 오류: " + String(e.message || e) }); }
 });
 
+// ---- 이미지 → WP 미디어 업로드 (드래그/붙여넣기/웹URL) ----
+app.post("/api/wp-media", async (req, res) => {
+  const wp = resolveWp(req.userId, req.body?.destinationId);
+  if (!wp || !wp.site || !wp.user || !wp.pass) return res.status(400).json({ error: "이미지 업로드는 워드프레스 목적지에서만 가능합니다(자격 확인)." });
+  try {
+    const { dataUrl, imageUrl } = req.body || {};
+    let buf, mime = "image/jpeg", fname = "image.jpg";
+    if (dataUrl) {
+      const m = String(dataUrl).match(/^data:([^;]+);base64,(.+)$/);
+      if (!m) throw new Error("잘못된 이미지 데이터");
+      mime = m[1]; buf = Buffer.from(m[2], "base64"); fname = "upload-" + Date.now() + "." + ((mime.split("/")[1] || "jpg").split("+")[0]);
+    } else if (imageUrl) {
+      const r = await fetch(imageUrl, { headers: { "User-Agent": "Mozilla/5.0", Referer: "" } });
+      if (!r.ok) throw new Error("원본 이미지 다운로드 실패 (" + r.status + ")");
+      mime = (r.headers.get("content-type") || "image/jpeg").split(";")[0]; buf = Buffer.from(await r.arrayBuffer());
+      fname = "web-" + Date.now() + "." + ((mime.split("/")[1] || "jpg").split("+")[0]);
+    } else return res.status(400).json({ error: "이미지가 없습니다." });
+    if (!/^image\//.test(mime)) throw new Error("이미지 형식이 아닙니다.");
+    if (buf.length > 12 * 1024 * 1024) throw new Error("이미지가 너무 큽니다(12MB 초과).");
+    const auth = "Basic " + Buffer.from(`${wp.user}:${String(wp.pass).replace(/\s+/g, "")}`).toString("base64");
+    const r = await fetch(`${wp.site}/wp-json/wp/v2/media`, { method: "POST", headers: { Authorization: auth, "Content-Type": mime, "Content-Disposition": `attachment; filename="${fname}"` }, body: buf });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.message || ("업로드 실패 " + r.status));
+    res.json({ url: j.source_url, id: j.id });
+  } catch (e) { res.status(500).json({ error: "이미지 업로드 오류: " + String(e.message || e) }); }
+});
+
 // ---- 초안(웹서치) 백그라운드 생성: 긴 요청이 Cloudflare 터널 타임아웃 나지 않게 job+폴링 ----
 const draftJobs = new Map();
 app.post("/api/draft/start", (req, res) => {
