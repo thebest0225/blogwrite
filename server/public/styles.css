@@ -283,6 +283,8 @@ input.saved::placeholder { color: #10b981; font-weight: 600; opacity: 1; }
 .ied-drag { cursor: grab; }
 .ied-drag:active { cursor: grabbing; }
 .ied-block.ied-dragging { opacity: .45; }
+.ied-imgmeta { display: flex; flex-direction: column; gap: 5px; margin: 4px 0 14px; }
+.ied-imgmeta input { font-size: 12.5px; padding: 6px 9px; }
 
 /* ===== 미리보기 / 결과 ===== */
 .result-actions { display: flex; gap: 8px; align-items: center; }

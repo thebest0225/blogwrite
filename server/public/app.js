@@ -1304,7 +1304,7 @@ function blockRow(b, i) {
   ctrl.appendChild(mkIconBtn("solar:arrow-up-linear", "위로", () => { const a = cur.article.blocks; if (i > 0) { [a[i - 1], a[i]] = [a[i], a[i - 1]]; refreshAfterEdit(); } }));
   ctrl.appendChild(mkIconBtn("solar:arrow-down-linear", "아래로", () => { const a = cur.article.blocks; if (i < a.length - 1) { [a[i + 1], a[i]] = [a[i], a[i + 1]]; refreshAfterEdit(); } }));
   const structural = !["paragraph", "heading", "list", "callout"].includes(b.type);
-  if (structural) ctrl.appendChild(mkIconBtn("solar:pen-linear", "수정", () => openBlockEdit(b, i, row)));
+  if (structural && b.type !== "image") ctrl.appendChild(mkIconBtn("solar:pen-linear", "수정", () => openBlockEdit(b, i, row)));
   ctrl.appendChild(mkIconBtn("solar:trash-bin-trash-linear", "삭제", () => { if (confirm("이 블록을 삭제할까요?")) { cur.article.blocks.splice(i, 1); refreshAfterEdit(); } }));
   row.appendChild(ctrl);
 
@@ -1319,8 +1319,19 @@ function blockRow(b, i) {
     el.innerText = (b.items || []).join("\n");
     el.addEventListener("blur", () => { b.items = el.innerText.split(/\n/).map((s) => s.trim()).filter(Boolean); refreshAfterEditLive(); });
     row.appendChild(el);
+  } else if (b.type === "image") {
+    // 이미지: 실제 미리보기 + 항상 보이는 설명(alt)·출처 입력
+    const view = document.createElement("div"); view.className = "ied-view";
+    try { view.innerHTML = buildHtml({ blocks: [b] }, { accent: accountStyle(cur.acc).accent, linkMode: "preserve" }).html; } catch { view.textContent = "[이미지]"; }
+    row.appendChild(view);
+    const meta = document.createElement("div"); meta.className = "ied-imgmeta";
+    const mk = (ph, val, set) => { const el = document.createElement("input"); el.placeholder = ph; el.value = val || ""; el.addEventListener("input", () => set(el.value)); el.addEventListener("blur", refreshAfterEditLive); return el; };
+    meta.appendChild(mk("이미지 설명(alt) — 검색 노출용", b.alt, (v) => (b.alt = v)));
+    meta.appendChild(mk("출처(선택) — 예: 사진: 국민연금공단", b.credit, (v) => (b.credit = v)));
+    meta.appendChild(mk("출처 링크(선택) — https://...", b.creditUrl, (v) => (b.creditUrl = v)));
+    row.appendChild(meta);
   } else {
-    // 구조 블록(버튼/링크카드/이미지/영상/표): 실제 렌더된 모습 그대로 표시
+    // 구조 블록(버튼/링크카드/영상/표): 실제 렌더된 모습 그대로 표시
     const view = document.createElement("div"); view.className = "ied-view";
     try { view.innerHTML = buildHtml({ blocks: [b] }, { accent: accountStyle(cur.acc).accent, linkMode: "preserve", relatedUrls: (lastMyPosts || []).map((x) => x.link), selfUrl: isDestRole(cur.acc) ? "" : destUrlForGen() }).html; }
     catch { view.textContent = edSummary(b); }
