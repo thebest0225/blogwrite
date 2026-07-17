@@ -1185,7 +1185,7 @@ function mkIconBtn(icon, title, fn) { const b = document.createElement("button")
 
 // ----- 편집기 이미지 드래그/붙여넣기 -----
 const fileToDataUrl = (file) => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(file); });
-async function insertDroppedImage({ file, url }) {
+async function insertDroppedImage({ file, url, index }) {
   if (!cur) return;
   setStatus("이미지 추가 중…");
   try {
@@ -1198,10 +1198,27 @@ async function insertDroppedImage({ file, url }) {
       finalUrl = await fileToDataUrl(file);  // 비-WP: 데이터URL(임시). 발행 전 확인 권장
     }
     if (!finalUrl) { setStatus("이미지 URL을 가져오지 못했어요.", true); return; }
-    cur.article.blocks.push({ type: "image", slot: "body", resolvedUrl: finalUrl, alt: "" });
+    const blocks = cur.article.blocks || (cur.article.blocks = []);
+    const at = (typeof index === "number" && index >= 0 && index <= blocks.length) ? index : blocks.length;
+    blocks.splice(at, 0, { type: "image", slot: "body", resolvedUrl: finalUrl, alt: "" });
     refreshAfterEdit();
-    setStatus("✅ 이미지를 본문 끝에 추가했어요. 위치는 ↑↓로 옮기세요.");
+    setStatus("✅ 드롭한 위치에 이미지를 넣었어요. (필요하면 ↑↓로 이동)");
   } catch (e) { setStatus("이미지 추가 실패: " + e.message, true); }
+}
+// 드롭 Y좌표 → 삽입할 blocks 인덱스
+function dropIndexFromY(clientY) {
+  const els = [...document.querySelectorAll("#editor .ied-block")];
+  for (let i = 0; i < els.length; i++) { const r = els[i].getBoundingClientRect(); if (clientY < r.top + r.height / 2) return i; }
+  return els.length;
+}
+// 붙여넣기 시 커서가 있는 블록 다음 위치
+function caretBlockIndex() {
+  const els = [...document.querySelectorAll("#editor .ied-block")];
+  const sel = document.getSelection(); const node = sel && sel.anchorNode;
+  const el = node ? (node.nodeType === 1 ? node : node.parentElement) : null;
+  const blk = el && el.closest ? el.closest(".ied-block") : null;
+  if (blk) { const i = els.indexOf(blk); if (i >= 0) return i + 1; }
+  return els.length;
 }
 function extractDragUrl(dt) {
   let url = dt.getData("text/uri-list") || "";
@@ -1209,21 +1226,40 @@ function extractDragUrl(dt) {
   if (!url) { const t = (dt.getData("text/plain") || "").trim(); if (/^https?:\/\/\S+/i.test(t)) url = t; }
   return (url || "").split("\n")[0].trim();
 }
+let _dragBlockIdx = null;   // 블록 순서변경 드래그 중인 소스 인덱스
+function moveBlock(src, dst) {
+  const a = cur.article.blocks; if (src == null || src < 0 || src >= a.length) return;
+  const [b] = a.splice(src, 1);
+  let t = dst > src ? dst - 1 : dst;   // 제거로 인한 인덱스 시프트 보정
+  a.splice(Math.max(0, Math.min(t, a.length)), 0, b);
+  refreshAfterEdit();
+}
 async function onEditorDrop(e) {
   if (!editMode || !cur) return;
   e.preventDefault(); $("editor").classList.remove("ied-dragover");
-  const dt = e.dataTransfer; if (!dt) return;
+  const dt = e.dataTransfer;
+  // 1) 내부 블록 순서변경
+  if (_dragBlockIdx != null || (dt && [...dt.types].includes("application/x-blockindex"))) {
+    const src = _dragBlockIdx != null ? _dragBlockIdx : parseInt(dt.getData("application/x-blockindex"), 10);
+    _dragBlockIdx = null;
+    const dst = dropIndexFromY(e.clientY);
+    if (!Number.isNaN(src)) moveBlock(src, dst);
+    return;
+  }
+  if (!dt) return;
+  const idx = dropIndexFromY(e.clientY);
+  // 2) 외부 이미지(파일/웹)
   const file = [...(dt.files || [])].find((f) => f.type.startsWith("image/"));
-  if (file) return insertDroppedImage({ file });
+  if (file) return insertDroppedImage({ file, index: idx });
   const url = extractDragUrl(dt);
-  if (url && /^https?:\/\//i.test(url)) return insertDroppedImage({ url });
+  if (url && /^https?:\/\//i.test(url)) return insertDroppedImage({ url, index: idx });
   setStatus("이미지를 인식하지 못했어요. 이미지 파일이나 웹 이미지를 끌어다 놓아 주세요.", true);
 }
 async function onEditorPaste(e) {
   if (!editMode || !cur) return;
   const items = [...(e.clipboardData?.items || [])];
   const img = items.find((it) => it.type.startsWith("image/"));
-  if (img) { const file = img.getAsFile(); if (file) { e.preventDefault(); await insertDroppedImage({ file }); } }
+  if (img) { const file = img.getAsFile(); if (file) { e.preventDefault(); await insertDroppedImage({ file, index: caretBlockIndex() }); } }
 }
 const ED_TYPE = { paragraph: "문단", heading: "제목", list: "리스트", table: "표", callout: "박스", cta: "버튼", linkcard: "링크카드", image: "이미지", youtube: "영상" };
 function edSummary(b) {
@@ -1260,6 +1296,11 @@ function blockRow(b, i) {
   const row = document.createElement("div"); row.className = "ied-block";
   // 우측 상단 컨트롤(hover 시 노출)
   const ctrl = document.createElement("div"); ctrl.className = "ied-ctrl";
+  // 잡아서 끌어 순서변경 핸들
+  const handle = document.createElement("span"); handle.className = "ied-btn ied-drag"; handle.title = "잡아서 끌어 이동"; handle.draggable = true; handle.innerHTML = `<iconify-icon icon="solar:menu-dots-bold"></iconify-icon>`;
+  handle.addEventListener("dragstart", (e) => { _dragBlockIdx = i; try { e.dataTransfer.setData("application/x-blockindex", String(i)); e.dataTransfer.effectAllowed = "move"; } catch {} row.classList.add("ied-dragging"); });
+  handle.addEventListener("dragend", () => { _dragBlockIdx = null; row.classList.remove("ied-dragging"); });
+  ctrl.appendChild(handle);
   ctrl.appendChild(mkIconBtn("solar:arrow-up-linear", "위로", () => { const a = cur.article.blocks; if (i > 0) { [a[i - 1], a[i]] = [a[i], a[i - 1]]; refreshAfterEdit(); } }));
   ctrl.appendChild(mkIconBtn("solar:arrow-down-linear", "아래로", () => { const a = cur.article.blocks; if (i < a.length - 1) { [a[i + 1], a[i]] = [a[i], a[i + 1]]; refreshAfterEdit(); } }));
   const structural = !["paragraph", "heading", "list", "callout"].includes(b.type);
@@ -1303,8 +1344,10 @@ function openBlockEdit(b, i, row) {
     const head = addInput("카드 제목", b.heading);
     apply = () => { b.heading = head.value.trim(); };
   } else if (b.type === "image") {
-    const alt = addInput("이미지 설명(alt)", b.alt);
-    apply = () => { b.alt = alt.value.trim(); };
+    const alt = addInput("대체텍스트(alt) — 검색 노출용 이미지 설명", b.alt);
+    const credit = addInput("출처 표기(선택) — 예: 사진: 국민연금공단", b.credit);
+    const creditUrl = addInput("출처 링크(선택) — https://...", b.creditUrl);
+    apply = () => { b.alt = alt.value.trim(); b.credit = credit.value.trim(); b.creditUrl = creditUrl.value.trim(); };
     form.appendChild(Object.assign(document.createElement("span"), { className: "muted", textContent: "이미지 재생성은 아래 '이미지 수정'에서" }));
   } else if (b.type === "table") {
     const ta = document.createElement("textarea"); ta.rows = 4; ta.placeholder = "행마다 줄바꿈, 칸은 | 로 구분"; ta.value = [(b.headers || []).join(" | "), ...(b.rows || []).map((r) => r.join(" | "))].join("\n"); form.appendChild(ta);
