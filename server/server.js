@@ -7,6 +7,8 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import * as DB from "./db.js";
+import { buildDraftPrompt, buildBloggerMain } from "./public/lib/prompts.js";
+import { buildHtml } from "./public/lib/html-builder.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -354,6 +356,14 @@ app.post("/api/drafts/status", (req, res) => { if (req.body?.id) DB.setDraftStat
 app.get("/api/schedules", (req, res) => res.json({ schedules: DB.listSchedules(req.userId) }));
 app.post("/api/schedules", (req, res) => res.json({ ok: true, schedules: DB.upsertSchedule(req.userId, req.body || {}) }));
 app.post("/api/schedules/delete", (req, res) => res.json({ ok: true, schedules: DB.deleteSchedule(req.userId, req.body?.id) }));
+// 지금 즉시 실행(테스트/수동 트리거) — 백그라운드로 돌리고 즉시 응답
+app.post("/api/schedules/run", (req, res) => {
+  const s = DB.getSchedule(req.userId, req.body?.id);
+  if (!s) return res.status(404).json({ error: "예약을 찾을 수 없음" });
+  DB.setScheduleStatus(s.id, "pending", "수동 실행 대기");
+  runSchedule({ ...s, status: "pending" }).catch(() => {});
+  res.json({ ok: true });
+});
 
 // ---- 목적지 관리 ----
 app.get("/api/destinations", (req, res) => res.json({ destinations: DB.listDestinations(req.userId) }));
@@ -414,6 +424,97 @@ function migrateOnce() {
   } catch (e) { console.warn("[migrate] 실패:", e.message); }
 }
 migrateOnce();
+
+// ============ 예약 실행 엔진 (서버 사이드, 브라우저 없이 동작) ============
+const isDestRoleRow = (a) => { const r = a.role || "destination"; return r === "destination" || r === "both"; };
+const firstLine = (t) => (String(t || "").split(/\n/).map((s) => s.replace(/^#+\s*/, "").trim()).find((s) => s.length > 1) || "").slice(0, 60);
+function parseArticle(raw) {
+  let t = String(raw || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+  const s = t.indexOf("{"), e = t.lastIndexOf("}");
+  if (s > 0 || e < t.length - 1) t = t.slice(s, e + 1);
+  try { return JSON.parse(t); } catch { return null; }
+}
+async function publishServer(userId, acc, { title, content }) {
+  if (acc.platform === "wordpress") {
+    const wp = resolveWp(userId, acc.id); if (!wp || !wp.site) throw new Error("WP 자격 없음");
+    const auth = "Basic " + Buffer.from(`${wp.user}:${wp.pass}`).toString("base64");
+    const r = await fetch(`${wp.site.replace(/\/+$/, "")}/wp-json/wp/v2/posts`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify({ title, content, status: "publish" }) });
+    const j = await r.json(); if (!r.ok) throw new Error(j.message || r.status); return j.link;
+  }
+  if (acc.platform === "blogger") {
+    const dest = DB.getDestination(userId, acc.id); const rt = dest?.creds?.refreshToken, blogId = dest?.creds?.blogId;
+    if (!rt || !blogId) throw new Error("블로거 미연결");
+    const access = await bloggerAccessToken(rt);
+    const r = await fetch(`https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts/`, { method: "POST", headers: { Authorization: "Bearer " + access, "Content-Type": "application/json" }, body: JSON.stringify({ title, content }) });
+    const j = await r.json(); if (!r.ok) throw new Error(j.error?.message || r.status); return j.url;
+  }
+  return null;
+}
+async function runSchedule(s) {
+  const userId = s.user_id;
+  DB.setScheduleStatus(s.id, "running", "");
+  try {
+    const aKey = DB.getSecret(userId, "anthropicKey") || ANTHROPIC_KEY;
+    const kKey = DB.getSecret(userId, "kieKey") || KIE;
+    const st = DB.getSettingsRaw(userId);
+    const today = new Date().toISOString().slice(0, 10);
+    let draftText = "", keyword = "";
+    // 1) 초안 확보
+    if (s.source === "draft" && s.draft_id) {
+      const d = DB.getDraft(userId, s.draft_id);
+      if (!d) throw new Error("선택한 초안을 찾을 수 없음");
+      draftText = d.content || ""; keyword = d.keyword || firstLine(draftText);
+    } else {
+      keyword = (s.keywords || "").split(/[\n,]/)[0].trim();
+      if (!keyword) throw new Error("키워드가 비어 있음");
+      if (!aKey) throw new Error("Anthropic 키 없음(초안 웹서치 생성 불가)");
+      const built = buildDraftPrompt({ keyword, today, audience: st.defaultAudience, tone: st.defaultTone });
+      draftText = await anthropicChat({ system: built.system, user: built.user, maxTokens: 16000, apiKey: aKey });
+      DB.addDraft(userId, { title: firstLine(draftText) || keyword, content: draftText, keyword, source: "scheduled" });
+    }
+    // 2) 초안까지만이면 종료
+    if (s.scope === "draft") { DB.setScheduleStatus(s.id, "done", `초안 생성 완료: ${keyword}`); return; }
+    // 3) 목적지 생성 (계정별)
+    if (!kKey) throw new Error("KIE 키 없음(목적지 생성 불가)");
+    const dests = DB.accountsForGeneration(userId).filter(isDestRoleRow);
+    if (!dests.length) throw new Error("목적지 계정이 없음(계정 관리에서 등록)");
+    const groups = {}; dests.forEach((a) => { (groups[a.platform] = groups[a.platform] || []).push(a); });
+    const idxIn = {}; let made = 0, pub = 0;
+    for (const acc of dests) {
+      idxIn[acc.platform] = (idxIn[acc.platform] || 0) + 1;
+      const variant = { index: idxIn[acc.platform], total: groups[acc.platform].length };
+      const built = buildBloggerMain({ sourceText: draftText, keyword, audience: st.defaultAudience, tone: st.defaultTone, authorBio: st.authorBio, today, imageCount: 1, reference: "", internalLinks: [], variant });
+      let content = "";
+      for (let attempt = 0; attempt < 2 && !content; attempt++) {
+        try { content = await kieChat({ system: built.system, user: built.user, maxTokens: 16000, temperature: 0.8, model: CHAT_MODEL, prefillJson: true, apiKey: kKey }); }
+        catch (e) { if (attempt) throw e; await sleep(1200); }
+      }
+      const article = parseArticle(content);
+      if (!article) continue;
+      article.today = today; article.keyword = keyword; if (st.authorBio) article.authorBio = st.authorBio;
+      const html = buildHtml(article, { accent: st.overlayAccent || "#e11d48", searchLinks: st.linkMode !== "model", adEnabled: st.adEnabled, adCode: st.adCode });
+      const wid = DB.upsertWorkItem(userId, { target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated" });
+      made++;
+      // 4) 발행 수준
+      if (s.publish === "auto" && acc.has_creds) {
+        try {
+          const link = await publishServer(userId, acc, { title: article.title, content: html });
+          if (link) { DB.upsertWorkItem(userId, { id: wid, target: acc.platform, destination_id: acc.id, title: article.title || "", status: "published", published_url: link, publish_mode: "auto" }); DB.addAsset(userId, { url: link, title: article.title, keyword, excerpt: (html || "").replace(/<[^>]+>/g, " ").slice(0, 4000) }); pub++; }
+        } catch (e) { /* 발행 실패 시 생성됨 상태로 남겨 수동 처리 */ }
+      }
+    }
+    DB.setScheduleStatus(s.id, "done", `목적지 ${made}개 생성${s.publish === "auto" ? ` · ${pub}개 자동발행` : " (작성완료, 수동발행 대기)"}`);
+  } catch (e) { DB.setScheduleStatus(s.id, "error", String(e.message || e)); }
+}
+let _schedRunning = false;
+async function checkSchedules() {
+  if (_schedRunning) return; _schedRunning = true;
+  try { const due = DB.dueSchedules(new Date().toISOString()); for (const s of due) await runSchedule(s); }
+  catch (e) { console.error("[schedule] loop error", e); }
+  finally { _schedRunning = false; }
+}
+setInterval(checkSchedules, 60000);
+setTimeout(checkSchedules, 8000);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`블로그 오토라이터 서버: http://localhost:${PORT}`));

@@ -49,6 +49,12 @@ CREATE INDEX IF NOT EXISTS idx_sched_user ON schedules(user_id);
 try { db.exec("ALTER TABLE destinations ADD COLUMN role TEXT DEFAULT 'destination'"); } catch {}
 // 발행 방식(auto=자동발행 / manual=HTML 수동) 컬럼
 try { db.exec("ALTER TABLE work_items ADD COLUMN publish_mode TEXT"); } catch {}
+// 예약 확장 컬럼 (초안/키워드 소스, 실행일시, 범위, 발행수준, 상태)
+for (const col of [
+  "source TEXT DEFAULT 'keyword'", "draft_id TEXT", "run_at TEXT",
+  "scope TEXT DEFAULT 'destination'", "publish TEXT DEFAULT 'none'",
+  "status TEXT DEFAULT 'pending'", "last_run TEXT", "result TEXT"
+]) { try { db.exec("ALTER TABLE schedules ADD COLUMN " + col); } catch {} }
 
 // ---- 암호화 (API 키·발행 자격) ----
 const SECRET = crypto.createHash("sha256").update(process.env.DATA_SECRET || "blogwrite-default-secret").digest();
@@ -197,15 +203,30 @@ export function upsertWorkItem(userId, w) {
 export function deleteWorkItem(userId, id) { db.prepare("DELETE FROM work_items WHERE user_id=? AND id=?").run(uid(userId), id); }
 
 // ---- 자동화 예약 ----
-export function listSchedules(userId) { return db.prepare("SELECT * FROM schedules WHERE user_id=? ORDER BY created_at DESC").all(uid(userId)); }
+export function listSchedules(userId) { return db.prepare("SELECT * FROM schedules WHERE user_id=? ORDER BY run_at IS NULL, run_at, created_at DESC").all(uid(userId)); }
+export function getSchedule(userId, id) { return db.prepare("SELECT * FROM schedules WHERE user_id=? AND id=?").get(uid(userId), id); }
 export function upsertSchedule(userId, s) {
   const id = s.id || rid("sch");
   const ex = db.prepare("SELECT id FROM schedules WHERE user_id=? AND id=?").get(uid(userId), id);
-  const vals = [s.name || "", s.mode || "preset", s.keywords || "", parseInt(s.times_per_day, 10) || 1, s.auto || "draft", s.enabled ? 1 : 0];
-  if (ex) db.prepare("UPDATE schedules SET name=?,mode=?,keywords=?,times_per_day=?,auto=?,enabled=? WHERE user_id=? AND id=?").run(...vals, uid(userId), id);
-  else db.prepare("INSERT INTO schedules(id,user_id,name,mode,keywords,times_per_day,auto,enabled,created_at) VALUES(?,?,?,?,?,?,?,?,?)").run(id, uid(userId), ...vals, now());
+  const row = {
+    name: s.name || "", source: s.source || "keyword", draft_id: s.draft_id || null,
+    keywords: s.keywords || "", run_at: s.run_at || null,
+    scope: s.scope || "destination", publish: s.publish || "none",
+    enabled: s.enabled ? 1 : 0,
+    // 편집 저장 시 재실행 가능하도록 상태 초기화(완료/오류였어도 pending 으로)
+    status: s.status || "pending"
+  };
+  if (ex) db.prepare("UPDATE schedules SET name=@name,source=@source,draft_id=@draft_id,keywords=@keywords,run_at=@run_at,scope=@scope,publish=@publish,enabled=@enabled,status=@status WHERE id=@id AND user_id=@uid").run({ ...row, id, uid: uid(userId) });
+  else db.prepare("INSERT INTO schedules(id,user_id,name,source,draft_id,keywords,run_at,scope,publish,enabled,status,created_at) VALUES(@id,@uid,@name,@source,@draft_id,@keywords,@run_at,@scope,@publish,@enabled,@status,@created)").run({ ...row, id, uid: uid(userId), created: now() });
   return listSchedules(userId);
 }
 export function deleteSchedule(userId, id) { db.prepare("DELETE FROM schedules WHERE user_id=? AND id=?").run(uid(userId), id); return listSchedules(userId); }
+// 실행 엔진용: 실행할 때가 된 예약(전 사용자)
+export function dueSchedules(nowIso) {
+  return db.prepare("SELECT * FROM schedules WHERE enabled=1 AND status='pending' AND run_at IS NOT NULL AND run_at<=? ORDER BY run_at").all(nowIso);
+}
+export function setScheduleStatus(id, status, result) {
+  db.prepare("UPDATE schedules SET status=?, result=?, last_run=? WHERE id=?").run(status, (result || "").slice(0, 500), now(), id);
+}
 
 export default db;

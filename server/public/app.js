@@ -88,7 +88,8 @@ async function init() {
   $("accCancel").addEventListener("click", resetAccForm);
   $("accGoogleConnect").addEventListener("click", onGoogleConnect);
   $("bloggerPublishBtn").addEventListener("click", bloggerPublish);
-  $("schMode").addEventListener("change", updateSchForm);
+  $("schSource").addEventListener("change", updateSchForm);
+  $("schScope").addEventListener("change", updateSchForm);
   $("schSave").addEventListener("click", onScheduleSave);
   $("schCancel").addEventListener("click", resetSchForm);
   $("optSave").addEventListener("click", onSaveOptions);
@@ -258,30 +259,76 @@ async function onAccountSave() {
 }
 
 // ---------- 자동화·예약 ----------
-function updateSchForm() { $("schKwRow").style.display = $("schMode").value === "preset" ? "" : "none"; }
-function resetSchForm() { $("schEditId").value = ""; $("schName").value = ""; $("schKeywords").value = ""; $("schMode").value = "preset"; $("schTimes").value = "1"; $("schAuto").value = "draft"; $("schEnabled").checked = true; updateSchForm(); $("schSave").textContent = "예약 저장"; }
+const SCH_STATUS = { pending: "대기", running: "실행중", done: "완료", error: "오류" };
+function toLocalInput(iso) { if (!iso) return ""; const d = new Date(iso); if (isNaN(d)) return ""; const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
+function fmtRunAt(iso) { if (!iso) return "일시 미지정"; const d = new Date(iso); if (isNaN(d)) return iso; const p = (n) => String(n).padStart(2, "0"); return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+function updateSchForm() {
+  const src = $("schSource").value;
+  $("schDraftRow").style.display = src === "draft" ? "" : "none";
+  $("schKwRow").classList.toggle("hidden", src !== "keyword");
+  const dest = $("schScope").value === "destination";
+  $("schPubRow").style.display = dest ? "" : "none";
+}
+async function loadSchDrafts(selId) {
+  const sel = $("schDraft"); if (!sel) return;
+  let data = { drafts: [] };
+  try { data = await apiJson("/api/drafts?limit=100"); } catch {}
+  sel.innerHTML = "";
+  const drafts = data.drafts || [];
+  if (!drafts.length) { const o = document.createElement("option"); o.value = ""; o.textContent = "(등록된 초안 없음 — 키워드 소스를 쓰세요)"; sel.appendChild(o); }
+  for (const d of drafts) { const o = document.createElement("option"); o.value = d.id; o.textContent = (d.title || d.keyword || d.id).slice(0, 60); sel.appendChild(o); }
+  if (selId) sel.value = selId;
+}
+function resetSchForm() {
+  $("schEditId").value = ""; $("schName").value = ""; $("schKeywords").value = ""; $("schRunAt").value = "";
+  $("schSource").value = "draft"; $("schScope").value = "destination"; $("schPublish").value = "none"; $("schEnabled").checked = true;
+  updateSchForm(); $("schSave").textContent = "예약 저장";
+}
 async function renderSchedules() {
+  await loadSchDrafts();
   const box = $("scheduleList"); let list = [];
   try { list = await apiJson("/api/schedules").then((j) => j.schedules || []); } catch {}
   box.innerHTML = "";
   if (!list.length) { box.innerHTML = '<div class="hist-empty">등록된 예약이 없습니다. 아래에서 추가하세요.</div>'; updateSchForm(); return; }
   for (const s of list) {
+    const scopeLabel = s.scope === "draft" ? "초안까지" : (s.publish === "auto" ? "목적지+자동발행" : "목적지(작성완료)");
+    const srcLabel = s.source === "draft" ? "초안" : `키워드:${(s.keywords || "").slice(0, 12)}`;
+    const stCls = s.status === "done" ? "on" : (s.status === "error" ? "off" : "");
     const row = document.createElement("div"); row.className = "acc-row";
     row.innerHTML = `<span class="acc-badge ${s.enabled ? "dest" : "cush"}">${s.enabled ? "ON" : "OFF"}</span>`
-      + `<span class="acc-plat">${s.mode === "trend" ? "트렌드탐색" : "지정키워드"} · 하루 ${s.times_per_day}회 · ${s.auto === "publish" ? "자동발행" : "초안만"}</span>`
-      + `<span class="nm">${s.name || "(이름없음)"}</span>`;
+      + `<span class="nm">${escapeHtml(s.name || "(이름없음)")}</span>`
+      + `<span class="acc-plat">${fmtRunAt(s.run_at)} · ${srcLabel} · ${scopeLabel}</span>`
+      + `<span class="cred-chip ${stCls}">${SCH_STATUS[s.status] || s.status || "대기"}</span>`
+      + (s.result ? `<span class="df" style="color:var(--muted);font-weight:500;">${escapeHtml(s.result).slice(0, 40)}</span>` : "");
+    const run = document.createElement("button"); run.className = "mini"; run.innerHTML = `<iconify-icon icon="solar:play-bold"></iconify-icon> 지금`;
+    run.title = "지금 즉시 실행"; run.addEventListener("click", async () => { if (!confirm("지금 이 예약을 실행할까요?")) return; run.disabled = true; setStatus(`⏳ '${s.name}' 실행 중… (완료까지 수십 초)`); await apiJson("/api/schedules/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: s.id }) }).catch(() => {}); setTimeout(renderSchedules, 3000); });
     const edit = document.createElement("button"); edit.className = "hist-del"; edit.textContent = "✎";
-    edit.addEventListener("click", () => { $("schEditId").value = s.id; $("schName").value = s.name || ""; $("schMode").value = s.mode; $("schKeywords").value = s.keywords || ""; $("schTimes").value = String(s.times_per_day || 1); $("schAuto").value = s.auto || "draft"; $("schEnabled").checked = !!s.enabled; updateSchForm(); $("schSave").textContent = "수정 저장"; });
+    edit.addEventListener("click", async () => { $("schEditId").value = s.id; $("schName").value = s.name || ""; $("schSource").value = s.source || "draft"; $("schKeywords").value = s.keywords || ""; $("schRunAt").value = toLocalInput(s.run_at); $("schScope").value = s.scope || "destination"; $("schPublish").value = s.publish || "none"; $("schEnabled").checked = !!s.enabled; await loadSchDrafts(s.draft_id); updateSchForm(); $("schSave").textContent = "수정 저장"; window.scrollTo({ top: 9999, behavior: "smooth" }); });
     const del = document.createElement("button"); del.className = "hist-del"; del.textContent = "✕";
     del.addEventListener("click", async () => { if (confirm("예약을 삭제할까요?")) { await apiJson("/api/schedules/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: s.id }) }).catch(() => {}); renderSchedules(); } });
-    row.appendChild(edit); row.appendChild(del); box.appendChild(row);
+    row.appendChild(run); row.appendChild(edit); row.appendChild(del); box.appendChild(row);
   }
   updateSchForm();
 }
 async function onScheduleSave() {
-  const s = { id: $("schEditId").value || undefined, name: $("schName").value.trim(), mode: $("schMode").value, keywords: $("schKeywords").value.trim(), times_per_day: parseInt($("schTimes").value, 10) || 1, auto: $("schAuto").value, enabled: $("schEnabled").checked };
+  const source = $("schSource").value;
+  const runAtLocal = $("schRunAt").value;
+  const s = {
+    id: $("schEditId").value || undefined,
+    name: $("schName").value.trim(),
+    source,
+    draft_id: source === "draft" ? $("schDraft").value : "",
+    keywords: source === "keyword" ? $("schKeywords").value.trim() : "",
+    run_at: runAtLocal ? new Date(runAtLocal).toISOString() : "",
+    scope: $("schScope").value,
+    publish: $("schPublish").value,
+    enabled: $("schEnabled").checked
+  };
   if (!s.name) { setStatus("예약 이름을 입력하세요.", true); return; }
-  try { await apiJson("/api/schedules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(s) }); resetSchForm(); renderSchedules(); setStatus("✅ 예약 저장됨 (실행 엔진은 다음 단계 연결)"); }
+  if (!s.run_at) { setStatus("실행 일시를 지정하세요.", true); return; }
+  if (source === "draft" && !s.draft_id) { setStatus("사용할 초안을 선택하세요(없으면 키워드 소스 이용).", true); return; }
+  if (source === "keyword" && !s.keywords) { setStatus("키워드를 입력하세요.", true); return; }
+  try { await apiJson("/api/schedules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(s) }); resetSchForm(); renderSchedules(); setStatus("✅ 예약 저장됨. 지정 시간에 서버가 자동 실행합니다."); }
   catch (e) { setStatus("예약 저장 실패: " + e.message, true); }
 }
 

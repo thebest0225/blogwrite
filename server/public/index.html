@@ -131,23 +131,27 @@
 
       <!-- 자동화·예약 -->
       <section class="view hidden" data-view="schedule">
-        <div class="view-head"><h2>자동화 · 예약</h2><span class="muted">키워드/트렌드로 자동 초안 생성 + 목적지 자동발행 (부재중용)</span></div>
+        <div class="view-head"><h2>자동화 · 예약</h2><span class="muted">지정한 날짜·시간에 서버가 알아서 초안·목적지 생성/발행 (부재중용)</span></div>
         <div class="card">
           <div id="scheduleList" class="acc-list"></div>
         </div>
         <div class="card">
           <div class="card-title" style="margin-bottom:10px;">예약 추가</div>
           <div class="grid2">
-            <label class="field"><span>이름</span><input type="text" id="schName" placeholder="예: 매일 트렌드 자동" /></label>
-            <label class="field"><span>방식</span><select id="schMode"><option value="preset">지정 키워드</option><option value="trend">트렌드/이슈 자동탐색</option></select></label>
+            <label class="field"><span>이름</span><input type="text" id="schName" placeholder="예: 주말 자동 발행" /></label>
+            <label class="field"><span>실행 일시</span><input type="datetime-local" id="schRunAt" /></label>
           </div>
-          <label class="field" id="schKwRow"><span>키워드 목록 (쉼표/줄바꿈 구분)</span><textarea id="schKeywords" rows="2" placeholder="예: 제주여행, 갤럭시 S26, ..."></textarea></label>
           <div class="grid2">
-            <label class="field"><span>하루 횟수</span><select id="schTimes"><option>1</option><option>2</option><option>3</option><option>4</option><option>6</option></select></label>
-            <label class="field"><span>목적지 자동발행</span><select id="schAuto"><option value="draft">초안만 생성(초안함)</option><option value="publish">목적지까지 자동발행</option></select></label>
+            <label class="field"><span>소스</span><select id="schSource"><option value="draft">등록된 초안 사용</option><option value="keyword">키워드로 초안부터 생성</option></select></label>
+            <label class="field" id="schDraftRow"><span>초안 선택</span><select id="schDraft"></select></label>
+          </div>
+          <label class="field hidden" id="schKwRow"><span>키워드 <span class="muted">(초안이 없을 때 · Claude 웹서치로 초안부터 생성)</span></span><input type="text" id="schKeywords" placeholder="예: 제주 3박4일 코스" /></label>
+          <div class="grid2">
+            <label class="field"><span>범위</span><select id="schScope"><option value="destination">초안 + 목적지 글까지</option><option value="draft">초안까지만</option></select></label>
+            <label class="field" id="schPubRow"><span>발행 수준</span><select id="schPublish"><option value="none">작성완료까지만 (수동발행 대기)</option><option value="auto">자동발행까지 (WP·블로거)</option></select></label>
           </div>
           <label class="check"><input type="checkbox" id="schEnabled" checked /><span>활성화</span></label>
-          <p class="muted">※ 자동 초안은 서버의 Claude(웹서치)로 작성됩니다. 실행 엔진은 다음 단계에 연결됩니다(예약은 지금 저장·관리 가능).</p>
+          <p class="muted">※ 서버가 1분마다 예약을 확인해 실행합니다. 초안 생성=Claude 공식(웹서치), 목적지=KIE. 자동발행은 연결된 WP·블로거만(네이버 제외). 예약 실행 시 이미지 생성은 생략됩니다(텍스트·링크 중심).</p>
           <div class="row" style="justify-content:flex-end;gap:8px;"><input type="hidden" id="schEditId" /><button class="mini" id="schCancel">초기화</button><button class="mini primary-mini" id="schSave">예약 저장</button></div>
         </div>
       </section>
