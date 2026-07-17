@@ -116,10 +116,10 @@ async function anthropicChat({ system, user, maxTokens = 16000, model, webSearch
   return content;
 }
 
-app.post("/api/chat", async (req, res) => {
-  const { system, user, maxTokens = 16000, temperature = 0.8, model, prefillJson = true, engine } = req.body;
-  const aKey = DB.getSecret(req.userId, "anthropicKey") || ANTHROPIC_KEY;
-  const kKey = DB.getSecret(req.userId, "kieKey") || KIE;
+async function runChat(userId, p) {
+  const { system, user, maxTokens = 16000, temperature = 0.8, model, prefillJson = true, engine } = p || {};
+  const aKey = DB.getSecret(userId, "anthropicKey") || ANTHROPIC_KEY;
+  const kKey = DB.getSecret(userId, "kieKey") || KIE;
   const useClaude = (engine === "claude" || (!engine && DEFAULT_ENGINE === "claude")) && !!aKey;
   let content = "", lastErr = null;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -135,8 +135,32 @@ app.post("/api/chat", async (req, res) => {
       if (useClaude && attempt === 1) { try { content = await kieChat({ system, user, maxTokens, temperature, model, prefillJson, apiKey: kKey }); if (content && content.trim()) break; } catch (e2) { lastErr = e2; } }
     }
   }
-  if (content && content.trim()) return res.json({ content });
-  res.status(502).json({ error: "AI 응답 실패(잠시 후 다시 시도해 주세요). " + (lastErr ? String(lastErr.message || lastErr).slice(0, 120) : "") });
+  if (content && content.trim()) return content;
+  throw new Error("AI 응답 실패(잠시 후 다시). " + (lastErr ? String(lastErr.message || lastErr).slice(0, 120) : ""));
+}
+// 동기 버전(짧은 호출용, 하위호환)
+app.post("/api/chat", async (req, res) => {
+  try { res.json({ content: await runChat(req.userId, req.body || {}) }); }
+  catch (e) { res.status(502).json({ error: String(e.message || e) }); }
+});
+// 백그라운드 버전(긴 생성 — 터널 타임아웃 회피): start + status 폴링
+const chatJobs = new Map();
+app.post("/api/chat/start", (req, res) => {
+  const id = "cj_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const userId = req.userId, body = req.body || {};
+  chatJobs.set(id, { status: "pending", ts: Date.now(), userId });
+  (async () => {
+    try { const content = await runChat(userId, body); const j = chatJobs.get(id); if (j) { j.status = "done"; j.content = content; j.ts = Date.now(); } }
+    catch (e) { const j = chatJobs.get(id); if (j) { j.status = "error"; j.error = String(e.message || e).slice(0, 200); j.ts = Date.now(); } }
+  })();
+  res.json({ jobId: id });
+});
+app.get("/api/chat/status", (req, res) => {
+  const j = chatJobs.get(req.query.id);
+  if (!j || j.userId !== req.userId) return res.status(404).json({ error: "작업 없음" });
+  const out = { status: j.status, content: j.content || "", error: j.error || "" };
+  if (j.status !== "pending" && Date.now() - j.ts > 300000) chatJobs.delete(req.query.id);
+  res.json(out);
 });
 
 // ---- 이미지 (KIE jobs) ----

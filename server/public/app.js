@@ -39,8 +39,17 @@ async function apiJson(url, opts) {
   if (!r.ok || j.error) throw new Error(j.error || `HTTP ${r.status}`);
   return j;
 }
-const chatComplete = ({ system, user, maxTokens, model, engine }) =>
-  apiJson("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, signal: genController?.signal, body: JSON.stringify({ system, user, maxTokens, model, engine: engine || settings?.genEngine }) }).then((j) => j.content);
+// 긴 생성은 백그라운드 잡+폴링(터널 타임아웃 회피). 중단(genAborted) 지원.
+async function chatComplete({ system, user, maxTokens, model, engine }) {
+  const { jobId } = await apiJson("/api/chat/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system, user, maxTokens, model, engine: engine || settings?.genEngine }) });
+  for (;;) {
+    if (genAborted) throw new Error("__abort__");
+    await sleep(2500);
+    let st; try { st = await apiJson("/api/chat/status?id=" + encodeURIComponent(jobId)); } catch (e) { continue; }
+    if (st.status === "done") return st.content;
+    if (st.status === "error") throw new Error(st.error || "AI 응답 실패");
+  }
+}
 const generateImage = ({ prompt, aspectRatio, resolution }) =>
   apiJson("/api/image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, aspect: aspectRatio, resolution }) }).then((j) => j.url);
 const editImage = ({ imageUrl, prompt, aspectRatio, resolution }) =>
@@ -74,7 +83,7 @@ async function init() {
   $("goAccounts")?.addEventListener("click", (e) => { e.preventDefault(); showView("accounts"); });
   $("genAll").addEventListener("click", generateAll);
   $("genDraft").addEventListener("click", generateDraft);
-  $("originalText").addEventListener("input", () => { activeDraftId = null; });  // 수동 편집/붙여넣기 = 새 초안
+  $("originalText").addEventListener("input", () => { activeDraftId = null; if (genMode !== "draft") $("genKeyword").value = deriveTopic(); });  // 수동 편집/붙여넣기 = 새 초안 + 주제 재추출
   $("copyDraftPrompt").addEventListener("click", copyDraftPromptText);
   document.querySelectorAll(".mode-tab").forEach((b) => b.addEventListener("click", () => setGenMode(b.dataset.mode)));
   $("editToggle").addEventListener("click", toggleEdit);
@@ -172,10 +181,12 @@ function setGenMode(mode) {
   const isDraft = mode === "draft", isCush = mode === "cushion";
   $("draftGenRow").classList.toggle("hidden", !isDraft);
   $("cushDestRow").classList.toggle("hidden", !isCush);
+  $("genKwRow").classList.toggle("hidden", isDraft);
   $("imgRow").classList.toggle("hidden", isDraft);
   $("accPickWrap").classList.toggle("hidden", isDraft);
   $("genAll").classList.toggle("hidden", isDraft);
   $("genDraft").classList.toggle("hidden", !isDraft);
+  if (!isDraft && !$("genKeyword").value.trim()) $("genKeyword").value = deriveTopic();
   $("originalLabel").innerHTML = isDraft
     ? `생성된 초안 <span class="muted">— AI 초안 결과가 여기 채워집니다(직접 붙여넣기·수정도 가능)</span>`
     : `원본 글(초안) <span class="muted">— 붙여넣기 / 초안함에서 불러오기 / ① 초안 만들기 결과</span>`;
@@ -383,6 +394,7 @@ async function loadDraft(id, title) {
   activeDraftId = d.id;
   showView("new");
   setGenMode("destination");
+  $("genKeyword").value = d.keyword || deriveTopic();
   setStatus(`📥 초안 "${d.title || title}" 불러옴. 계정을 고르고 '목적지 생성'을 누르세요.`);
 }
 
@@ -436,10 +448,22 @@ function progressDone(ok, msg) {
 function closeProgress() { progressOpen = false; $("progressModal").classList.add("hidden"); $("pmStep").classList.remove("err"); }
 function clearStatus() { $("status").classList.add("hidden"); }
 function todayStr() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+const _cleanTopic = (s) => s.replace(/[*_`>#\[\]]/g, "").replace(/^\s*[-•]\s*/, "").trim().slice(0, 50);
+const _BAD_TITLE = /^(요약|3줄|한\s*줄\s*요약|핵심\s*요약|tl;?dr|목차|개요|들어가며|서론|주제\s*[:：]|제목\s*[:：]|키워드\s*[:：]|본문|이\s*글)/i;
 function deriveTopic() {
   const src = $("originalText").value || "";
-  const first = src.split(/\n/).map((s) => s.replace(/^#+\s*/, "").replace(/[*_`>#]/g, "").trim()).find((s) => s.length > 1) || "";
-  return first.slice(0, 40);
+  const lines = src.split(/\n/).map((s) => s.trim()).filter(Boolean);
+  // 1) 첫 마크다운 H1 우선
+  const h1 = lines.find((l) => /^#\s+\S/.test(l));
+  if (h1) return _cleanTopic(h1.replace(/^#\s+/, "").replace(/\s*[:：].*$/, ""));
+  // 2) 라벨/메타 줄은 건너뛰고 제목다운 첫 줄
+  for (const l of lines) {
+    const c = l.replace(/^#+\s*/, "").replace(/[*_`>]/g, "").trim();
+    if (c.length < 3) continue;
+    if (_BAD_TITLE.test(c)) continue;
+    return _cleanTopic(c.replace(/\s*[:：].*$/, ""));
+  }
+  return _cleanTopic((lines[0] || "").replace(/^#+\s*/, ""));
 }
 function getDestUrl() { return ($("bloggerUrl")?.value?.trim()) || settings.myBlogUrl || lastMainUrl || ""; }
 function parseJson(raw) {
@@ -868,7 +892,7 @@ async function generateAll() {
     const asset = (cushAssets || []).find((a) => a.url === destUrl);
     if (asset) reference = `[유입 목적지 글: ${asset.title || ""}]\n${asset.excerpt || asset.summary || ""}`.trim();
   }
-  const keyword = deriveTopic();
+  const keyword = ($("genKeyword").value || "").trim() || deriveTopic();
   // 붙여넣기/직접작성 원본도 초안함에 축적(로드된 초안이 아니면)
   if (!activeDraftId && $("originalText").value.trim()) {
     try { const j = await apiJson("/api/drafts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: (deriveTopic() || keyword || "붙여넣은 초안").slice(0, 80), content: $("originalText").value.trim(), keyword, source: "pasted" }) }); activeDraftId = j.draft?.id || null; updateInboxBadge(); } catch {}
@@ -893,7 +917,7 @@ async function generateAll() {
       progressStep(`[${acc.name}] ${eng === "claude" ? "웹서치·작성" : "재가공"} 중… (${done + 1}/${total})`, base);
       let article;
       try { article = await chatArticle(promptForAccount(acc, keyword, variant, destUrl, reference)); }
-      catch (e) { if (genAborted || e.name === "AbortError") break; progressLog(`✗ ${acc.name} 실패: ${e.message}`, "error"); done++; continue; }
+      catch (e) { if (genAborted || e.name === "AbortError" || e.message === "__abort__") break; progressLog(`✗ ${acc.name} 실패: ${e.message}`, "error"); done++; continue; }
       const html = await finalizeForAccount(acc, article, keyword, destUrl);
       const wid = await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ draft_id: activeDraftId, target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated", role: genMode }) }).then((j) => j.id).catch(() => null);
       await storeAdd({ type: "article", title: article.title || "", keyword, platform: acc.platform });
@@ -923,7 +947,7 @@ async function generateAll() {
     } else {
       progressDone(false, "모든 계정 생성 실패. 키/네트워크를 확인하세요.");
     }
-  } catch (e) { if (genAborted || e.name === "AbortError") { progressDone(false, "중단되었습니다."); setStatus("생성을 중단했습니다."); } else { progressDone(false, "오류: " + e.message); setStatus("오류: " + e.message, true); } }
+  } catch (e) { if (genAborted || e.name === "AbortError" || e.message === "__abort__") { progressDone(false, "중단되었습니다."); setStatus("생성을 중단했습니다."); } else { progressDone(false, "오류: " + e.message); setStatus("오류: " + e.message, true); } }
   finally {
     $("genAll").disabled = false;
     if (okCount) { showView("board"); await renderWorkList(); if (workItems[0]) openWork(workItems[0].id); }
