@@ -5,28 +5,29 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>블로그라이터</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css" />
+  <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div class="app">
     <!-- 사이드바 -->
     <aside class="sidebar">
-      <div class="brand">✍️ <span>블로그라이터</span></div>
+      <div class="brand"><iconify-icon icon="solar:pen-new-square-bold-duotone"></iconify-icon> <span>블로그라이터</span></div>
       <nav class="nav">
-        <button class="nav-item active" data-view="board"><span class="ni">📋</span> 작업보드</button>
-        <button class="nav-item" data-view="new"><span class="ni">✨</span> 새 글 생성</button>
-        <button class="nav-item" data-view="inbox"><span class="ni">📥</span> 초안함 <span class="nav-badge hidden" id="inboxBadge">0</span></button>
-        <button class="nav-item" data-view="accounts"><span class="ni">🔑</span> 계정 관리</button>
-        <button class="nav-item" data-view="schedule"><span class="ni">⏰</span> 자동화·예약</button>
-        <button class="nav-item" data-view="assets"><span class="ni">🔗</span> 발행 자산</button>
-        <button class="nav-item" data-view="settings"><span class="ni">⚙️</span> 설정</button>
+        <button class="nav-item active" data-view="board"><iconify-icon class="ni" icon="solar:clipboard-list-bold-duotone"></iconify-icon> 작업보드</button>
+        <button class="nav-item" data-view="new"><iconify-icon class="ni" icon="solar:magic-stick-3-bold-duotone"></iconify-icon> 새 글 생성</button>
+        <button class="nav-item" data-view="inbox"><iconify-icon class="ni" icon="solar:inbox-line-bold-duotone"></iconify-icon> 초안함 <span class="nav-badge hidden" id="inboxBadge">0</span></button>
+        <button class="nav-item" data-view="accounts"><iconify-icon class="ni" icon="solar:key-minimalistic-square-bold-duotone"></iconify-icon> 계정 관리</button>
+        <button class="nav-item" data-view="schedule"><iconify-icon class="ni" icon="solar:alarm-bold-duotone"></iconify-icon> 자동화·예약</button>
+        <button class="nav-item" data-view="assets"><iconify-icon class="ni" icon="solar:link-round-angle-bold-duotone"></iconify-icon> 발행 자산</button>
+        <button class="nav-item" data-view="settings"><iconify-icon class="ni" icon="solar:settings-bold-duotone"></iconify-icon> 설정</button>
       </nav>
-      <div class="side-foot muted">MangoHub 계정 연동됨</div>
+      <div class="side-foot muted"><iconify-icon icon="solar:shield-check-bold-duotone"></iconify-icon> MangoHub 계정 연동됨</div>
     </aside>
 
     <!-- 본문 -->
     <main class="content">
-      <div id="apiWarn" class="warn hidden">⚠️ 생성 엔진 키가 없습니다. <b>설정</b>에서 Anthropic 또는 KIE 키를 입력하세요.</div>
+      <div id="apiWarn" class="warn hidden"><iconify-icon icon="solar:danger-triangle-bold-duotone"></iconify-icon> 생성 엔진 키가 없습니다. <b>설정</b>에서 Anthropic 또는 KIE 키를 입력하세요.</div>
       <div id="status" class="status hidden"></div>
 
       <!-- 작업보드 -->
@@ -34,13 +35,13 @@
         <div class="view-head"><h2>작업보드</h2><span class="muted">생성된 글을 검수·발행합니다. 발행하면 목록에서 사라집니다.</span></div>
         <div id="workDetail" class="card" style="display:none;">
           <div class="row" style="justify-content:space-between;align-items:center;">
-            <button class="mini" id="workBack">← 목록으로</button>
+            <button class="mini" id="workBack"><iconify-icon icon="solar:arrow-left-linear"></iconify-icon> 목록으로</button>
             <div class="result-actions">
-              <button class="mini" id="editToggle">✏️ 편집</button>
-              <button class="mini primary-mini" id="copyBtn">📋 HTML 복사</button>
+              <button class="mini" id="editToggle"><iconify-icon icon="solar:pen-2-linear"></iconify-icon> 편집</button>
+              <button class="mini primary-mini" id="copyBtn"><iconify-icon icon="solar:copy-linear"></iconify-icon> HTML 복사</button>
               <span id="wpActions" class="result-actions hidden">
                 <button class="mini" id="wpDraftBtn">WP 초안</button>
-                <button class="mini primary-mini" id="wpPublishBtn">WP 발행</button>
+                <button class="mini primary-mini" id="wpPublishBtn"><iconify-icon icon="solar:upload-minimalistic-linear"></iconify-icon> WP 발행</button>
               </span>
             </div>
           </div>
@@ -52,7 +53,7 @@
           <div class="meta-line" id="metaLine"></div>
           <iframe id="preview" class="preview"></iframe>
           <div id="editor" class="editor hidden"></div>
-          <details class="imgedit hidden" id="imgEditBox"><summary>🖌️ 이미지 수정 / 다시 생성</summary><div id="imgEditList" class="imgedit-list"></div></details>
+          <details class="imgedit hidden" id="imgEditBox"><summary><iconify-icon icon="solar:palette-bold-duotone"></iconify-icon> 이미지 수정 / 다시 생성</summary><div id="imgEditList" class="imgedit-list"></div></details>
         </div>
         <div class="card" id="boardListCard">
           <div id="workList" class="acc-list"></div>
@@ -63,8 +64,8 @@
       <section class="view hidden" data-view="new">
         <div class="view-head"><h2>새 글 생성</h2><span class="muted">① 목적지 먼저 만들어 발행 → ② 그 URL로 쿠션 생성</span></div>
         <div class="mode-tabs">
-          <button class="mode-tab active" data-mode="destination">① 목적지 만들기</button>
-          <button class="mode-tab" data-mode="cushion">② 쿠션 만들기</button>
+          <button class="mode-tab active" data-mode="destination"><iconify-icon icon="solar:target-bold-duotone"></iconify-icon> ① 목적지 만들기</button>
+          <button class="mode-tab" data-mode="cushion"><iconify-icon icon="solar:share-circle-bold-duotone"></iconify-icon> ② 쿠션 만들기</button>
         </div>
         <div class="card">
           <p class="muted" id="modeHelp">원본으로 <b>목적지 계정</b>에 완성글을 생성합니다. 생성 후 작업보드에서 발행하면 URL이 생겨요.</p>
@@ -83,9 +84,9 @@
             <label class="imgcount"><span>썸네일 비율</span><select id="imgAspect"><option value="4:3">4:3</option><option value="16:9">16:9</option><option value="1:1">1:1</option></select></label>
           </div>
           <p class="muted"><b id="genAccCount">0</b>개 <span id="modeAccLabel">목적지</span> 계정에 각각 다른 글을 생성합니다. <a href="#" id="goAccounts">계정 관리 →</a></p>
-          <button class="primary" id="genAll">✨ 목적지 생성</button>
+          <button class="primary" id="genAll"><iconify-icon icon="solar:magic-stick-3-bold"></iconify-icon> 목적지 생성</button>
         </div>
-        <details class="card"><summary class="card-title" style="cursor:pointer;">🔥 지금 뜨는 트렌드 <span class="muted">— 클릭 시 복사</span></summary>
+        <details class="card"><summary class="card-title" style="cursor:pointer;"><iconify-icon icon="solar:fire-bold-duotone"></iconify-icon> 지금 뜨는 트렌드 <span class="muted">— 클릭 시 복사</span></summary>
           <div class="row" style="margin-top:8px;align-items:center;"><span id="trendMeta" class="muted" style="flex:1;"></span><button class="mini" id="trendRefresh">새로고침</button></div>
           <div id="trendList" class="history-list"></div>
         </details>
@@ -168,14 +169,14 @@
       <section class="view hidden" data-view="settings">
         <div class="view-head"><h2>설정</h2><span class="muted">내 계정 전용. API 키는 암호화 저장(비우면 유지).</span></div>
         <div class="card optform">
-          <div class="opt-sec">🔑 API 키</div>
+          <div class="opt-sec"><iconify-icon icon="solar:key-bold-duotone"></iconify-icon> API 키</div>
           <label class="field"><span>Anthropic API 키 (Claude 웹서치 생성) <span id="hasAnthropic" class="muted"></span></span><input type="password" id="optAnthropicKey" placeholder="sk-ant-..." autocomplete="off" /></label>
           <label class="field"><span>KIE API 키 (이미지 생성) <span id="hasKie" class="muted"></span></span><input type="password" id="optKieKey" autocomplete="off" /></label>
           <div class="grid2">
             <label class="field"><span>네이버 Client ID <span id="hasNid" class="muted"></span></span><input type="password" id="optNaverId" autocomplete="off" /></label>
             <label class="field"><span>네이버 Client Secret <span id="hasNsec" class="muted"></span></span><input type="password" id="optNaverSecret" autocomplete="off" /></label>
           </div>
-          <div class="opt-sec">✍️ 생성 설정</div>
+          <div class="opt-sec"><iconify-icon icon="solar:pen-bold-duotone"></iconify-icon> 생성 설정</div>
           <div class="grid2">
             <label class="field"><span>글 생성 엔진</span><select id="optEngine"><option value="claude">Claude API (웹서치·권장)</option><option value="kie">KIE (저렴)</option></select></label>
             <label class="field"><span>KIE 모델</span><select id="optChatModel"><option value="claude-sonnet-5">Sonnet 5</option><option value="claude-opus-4-8">Opus 4.8</option></select></label>

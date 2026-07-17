@@ -124,7 +124,7 @@ function setGenMode(mode) {
   const cushion = mode === "cushion";
   $("cushDestRow").classList.toggle("hidden", !cushion);
   $("modeAccLabel").textContent = cushion ? "쿠션" : "목적지";
-  $("genAll").textContent = cushion ? "✨ 쿠션 생성" : "✨ 목적지 생성";
+  $("genAll").innerHTML = `<iconify-icon icon="solar:magic-stick-3-bold"></iconify-icon> ${cushion ? "쿠션 생성" : "목적지 생성"}`;
   $("modeHelp").innerHTML = cushion
     ? "발행된 <b>목적지 글</b>을 고르면, 원본+목적지를 함께 참고해 새 정보·연관검색어를 더한 <b>쿠션</b>을 계정별로 생성합니다."
     : "원본으로 <b>목적지 계정</b>에 완성글을 생성합니다. 생성 후 작업보드에서 발행하면 URL이 생겨요.";
@@ -628,7 +628,7 @@ async function saveCur() {
 function toggleEdit() {
   editMode = !editMode;
   $("editToggle").classList.toggle("primary-mini", editMode);
-  $("editToggle").textContent = editMode ? "✅ 편집 완료" : "✏️ 편집";
+  $("editToggle").innerHTML = editMode ? `<iconify-icon icon="solar:check-circle-bold"></iconify-icon> 편집 완료` : `<iconify-icon icon="solar:pen-2-linear"></iconify-icon> 편집`;
   $("editor").classList.toggle("hidden", !editMode);
   if (editMode) renderEditor();
 }
