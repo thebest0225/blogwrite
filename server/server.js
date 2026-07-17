@@ -657,6 +657,30 @@ async function publishDueWorkItem(row) {
     }
   } catch (e) { console.error("[work publish]", row.id, e.message); DB.setWorkPublishAt(userId, row.id, null); }  // 실패 시 예약 해제(무한 재시도 방지) — 작업보드에 남음
 }
+// 초안 자동 처리: 들어온 초안 → 니치 매칭 목적지 글 생성 → 작업보드(발행 안 함)
+const topicScore = (acc, text) => { const ts = (acc.topics || "").split(/[,\n]/).map((t) => t.trim().toLowerCase()).filter((t) => t.length >= 2); let s = 0; for (const t of ts) if (text.includes(t)) s++; return s; };
+async function processAutoDraft(userId, draft) {
+  const kKey = DB.getSecret(userId, "kieKey") || KIE;
+  if (!kKey) return;
+  const st = DB.getSettingsRaw(userId);
+  const dests = DB.accountsForGeneration(userId).filter(isDestRoleRow);
+  const text = ((draft.keyword || "") + " " + (draft.title || "")).toLowerCase();
+  const scored = dests.map((a) => ({ a, s: topicScore(a, text) })).filter((x) => x.s > 0).sort((x, y) => y.s - x.s);
+  if (!scored.length) return;   // 니치 매칭 없으면 자동처리 안 함(수동으로 두기)
+  const acc = scored[0].a;      // 가장 잘 맞는 목적지 1곳
+  DB.setDraftStatus(userId, draft.id, "used");   // 먼저 소비(중복처리 방지)
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const keyword = draft.keyword || firstLine(draft.content);
+    const built = buildBloggerMain({ sourceText: draft.content || "", keyword, audience: st.defaultAudience, tone: st.defaultTone, authorBio: st.authorBio, today, imageCount: 1, reference: "", internalLinks: [], variant: { persona: acc.persona || "" } });
+    let content = "";
+    for (let attempt = 0; attempt < 2 && !content; attempt++) { try { content = await kieChat({ system: built.system, user: built.user, maxTokens: 16000, temperature: 0.8, model: CHAT_MODEL, prefillJson: true, apiKey: kKey }); } catch (e) { if (attempt) throw e; await sleep(1200); } }
+    const article = parseArticle(content); if (!article) throw new Error("파싱 실패");
+    article.today = today; article.keyword = keyword; if (st.authorBio) article.authorBio = st.authorBio;
+    const html = buildHtml(article, { accent: st.overlayAccent || "#e11d48", linkMode: st.linkMode || "preserve", adEnabled: st.adEnabled, adCode: st.adCode }).html;
+    DB.upsertWorkItem(userId, { draft_id: draft.id, target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated" });
+  } catch (e) { console.error("[auto-draft]", draft.id, e.message); }   // 실패해도 소비됨(재제출 가능)
+}
 let _schedRunning = false;
 async function checkSchedules() {
   if (_schedRunning) return; _schedRunning = true;
@@ -664,6 +688,8 @@ async function checkSchedules() {
     const nowIso = new Date().toISOString();
     const due = DB.dueSchedules(nowIso); for (const s of due) await runSchedule(s);
     const dueWork = DB.dueWorkPublish(nowIso); for (const w of dueWork) await publishDueWorkItem(w);   // 예약 발행 큐
+    // 초안 자동 처리(설정 ON 사용자)
+    for (const d of DB.newAutoDrafts(5)) { if (DB.getSettingsRaw(d.user_id).autoProcessDrafts) await processAutoDraft(d.user_id, d); }
   }
   catch (e) { console.error("[schedule] loop error", e); }
   finally { _schedRunning = false; }

@@ -49,6 +49,8 @@ CREATE INDEX IF NOT EXISTS idx_sched_user ON schedules(user_id);
 try { db.exec("ALTER TABLE destinations ADD COLUMN role TEXT DEFAULT 'destination'"); } catch {}
 try { db.exec("ALTER TABLE destinations ADD COLUMN persona TEXT"); } catch {}
 try { db.exec("ALTER TABLE destinations ADD COLUMN topics TEXT"); } catch {}
+// 초안 → 목적지 자동 배분(니치)용 컬럼
+try { db.exec("ALTER TABLE drafts ADD COLUMN dest_id TEXT"); } catch {}
 // 발행 방식(auto=자동발행 / manual=HTML 수동) 컬럼
 try { db.exec("ALTER TABLE work_items ADD COLUMN publish_mode TEXT"); } catch {}
 try { db.exec("ALTER TABLE work_items ADD COLUMN publish_at TEXT"); } catch {}
@@ -142,26 +144,43 @@ export function accountsForGeneration(userId) {
   return rows.map((d) => { const has = !!(d.creds && d.creds.length); delete d.creds; return { ...d, has_creds: has }; });
 }
 
+// ---- 초안 → 목적지 니치 자동 분류 ----
+export function classifyDestination(userId, text) {
+  const t = (text || "").toLowerCase();
+  if (!t) return null;
+  const dests = db.prepare("SELECT id,topics FROM destinations WHERE user_id=? AND (role='destination' OR role='both')").all(uid(userId));
+  let best = null, bestScore = 0;
+  for (const d of dests) {
+    const toks = ((d.topics || "").toLowerCase().split(/[\s,]+/)).filter((x) => x.length >= 2);
+    let s = 0; for (const k of toks) if (t.includes(k)) s++;
+    if (s > bestScore) { bestScore = s; best = d.id; }
+  }
+  return bestScore > 0 ? best : null;
+}
+
 // ---- 초안함 ----
-export function listDrafts(userId) { return db.prepare("SELECT id,date,status,title,content,keyword,source FROM drafts WHERE user_id=? ORDER BY date DESC").all(uid(userId)); }
+export function listDrafts(userId) { return db.prepare("SELECT id,date,status,title,content,keyword,source,dest_id FROM drafts WHERE user_id=? ORDER BY date DESC").all(uid(userId)); }
 // 수천건 대비 검색·페이지네이션
 export function listDraftsPage(userId, { q = "", status = "", offset = 0, limit = 50 } = {}) {
   let where = "user_id=?"; const args = [uid(userId)];
   if (status) { where += " AND status=?"; args.push(status); }
   if (q) { where += " AND (title LIKE ? OR keyword LIKE ?)"; args.push("%" + q + "%", "%" + q + "%"); }
   const total = db.prepare(`SELECT COUNT(*) c FROM drafts WHERE ${where}`).get(...args).c;
-  const drafts = db.prepare(`SELECT id,date,status,title,keyword,source,substr(content,1,160) AS preview FROM drafts WHERE ${where} ORDER BY date DESC LIMIT ? OFFSET ?`).all(...args, Math.min(limit, 200), Math.max(0, offset));
+  const drafts = db.prepare(`SELECT id,date,status,title,keyword,source,dest_id,substr(content,1,160) AS preview FROM drafts WHERE ${where} ORDER BY date DESC LIMIT ? OFFSET ?`).all(...args, Math.min(limit, 200), Math.max(0, offset));
   return { drafts, total };
 }
 export function getDraft(userId, id) { return db.prepare("SELECT * FROM drafts WHERE user_id=? AND id=?").get(uid(userId), id); }
 export function countNewDrafts(userId) { return db.prepare("SELECT COUNT(*) c FROM drafts WHERE user_id=? AND status='new'").get(uid(userId)).c; }
 export function addDraft(userId, d) {
-  const rec = { id: rid("d"), user_id: uid(userId), date: now(), status: "new", title: d.title || "(제목없음)", content: d.content || "", keyword: d.keyword || "", source: d.source || "web" };
-  db.prepare("INSERT INTO drafts(id,user_id,date,status,title,content,keyword,source) VALUES(@id,@user_id,@date,@status,@title,@content,@keyword,@source)").run(rec);
+  const dest_id = d.dest_id || classifyDestination(userId, (d.title || "") + " " + (d.keyword || "") + " " + (d.content || "").slice(0, 600));
+  const rec = { id: rid("d"), user_id: uid(userId), date: now(), status: "new", title: d.title || "(제목없음)", content: d.content || "", keyword: d.keyword || "", source: d.source || "web", dest_id: dest_id || null };
+  db.prepare("INSERT INTO drafts(id,user_id,date,status,title,content,keyword,source,dest_id) VALUES(@id,@user_id,@date,@status,@title,@content,@keyword,@source,@dest_id)").run(rec);
   return rec;
 }
 export function deleteDraft(userId, id) { db.prepare("DELETE FROM drafts WHERE user_id=? AND id=?").run(uid(userId), id); }
 export function setDraftStatus(userId, id, status) { db.prepare("UPDATE drafts SET status=? WHERE user_id=? AND id=?").run(status, uid(userId), id); }
+// 자동 처리 대상: 들어온(mcp/ai) 새 초안 (전 사용자, 소량씩)
+export function newAutoDrafts(limit = 5) { return db.prepare("SELECT * FROM drafts WHERE status='new' AND source IN ('mcp','ai-draft') ORDER BY date LIMIT ?").all(limit); }
 
 // ---- 발행 자산(연관 링크 소스) ----
 export function listAssets(userId) { return db.prepare("SELECT date,url,title,keyword,excerpt FROM assets WHERE user_id=? ORDER BY date DESC").all(uid(userId)); }

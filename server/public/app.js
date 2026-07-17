@@ -22,7 +22,7 @@ const DEFAULTS = {
   linkMode: "preserve", myBlogUrl: "", defaultTone: "친근하고 신뢰감 있는",
   defaultAudience: "관련 정보를 처음 찾아보는 일반 독자",
   authorBio: "여러 분야의 정보를 직접 찾아보고, 최신 자료와 공식 출처를 확인해 이해하기 쉽게 정리합니다. 검색만으로는 흩어져 있던 내용을 한곳에 모아, 실제로 도움이 되는 알맹이만 담으려 합니다.",
-  adEnabled: false, adCode: "", internalLinks: false, generateImages: true, imageCount: 1, autoPublish: false, stockPhotos: true
+  adEnabled: false, adCode: "", internalLinks: false, generateImages: true, imageCount: 1, autoPublish: false, stockPhotos: true, autoProcessDrafts: false
 };
 
 // ---------- API ----------
@@ -541,6 +541,7 @@ function populateSettings() {
   $("optThumbStyle").value = settings.thumbnailStylePrompt || "";
   $("optAdEnabled").checked = !!settings.adEnabled;
   $("optAutoPublish").checked = !!settings.autoPublish;
+  $("optAutoProcessDrafts").checked = !!settings.autoProcessDrafts;
   $("optAdCode").value = settings.adCode || "";
 }
 async function onSaveOptions() {
@@ -556,7 +557,7 @@ async function onSaveOptions() {
     linkMode: $("optLinkMode").value, overlayAccent: $("optAccent").value, myBlogUrl: $("optMyBlog").value.trim(),
     defaultTone: $("optTone").value.trim(), defaultAudience: $("optAudience").value.trim(), authorBio: $("optAuthorBio").value.trim(),
     thumbnailStylePrompt: $("optThumbStyle").value.trim(), adEnabled: $("optAdEnabled").checked, adCode: $("optAdCode").value.trim(),
-    autoPublish: $("optAutoPublish").checked, stockPhotos: $("optStockPhotos").checked
+    autoPublish: $("optAutoPublish").checked, stockPhotos: $("optStockPhotos").checked, autoProcessDrafts: $("optAutoProcessDrafts").checked
   };
   try { await saveSettings(patch); settings = await getSettings(); try { config = await apiJson("/api/config"); } catch {} $("apiWarn").classList.toggle("hidden", !!config.kieEnabled || !!config.claudeEnabled); populateSettings(); setStatus("✅ 설정 저장됨"); }
   catch (e) { setStatus("설정 저장 실패: " + e.message, true); }
