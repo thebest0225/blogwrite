@@ -39,6 +39,8 @@ CREATE INDEX IF NOT EXISTS idx_assets_user ON assets(user_id);
 CREATE INDEX IF NOT EXISTS idx_work_user ON work_items(user_id);
 CREATE INDEX IF NOT EXISTS idx_dest_user ON destinations(user_id);
 `);
+// 계정 역할(목적지/쿠션/겸용) 컬럼 (기존 테이블에도 추가)
+try { db.exec("ALTER TABLE destinations ADD COLUMN role TEXT DEFAULT 'destination'"); } catch {}
 
 // ---- 암호화 (API 키·발행 자격) ----
 const SECRET = crypto.createHash("sha256").update(process.env.DATA_SECRET || "blogwrite-default-secret").digest();
@@ -64,7 +66,7 @@ const now = () => new Date().toISOString();
 const rid = (p) => p + Date.now().toString(36) + crypto.randomBytes(3).toString("hex");
 
 // ---- 설정 (민감키는 암호화 저장, 반환 시 존재여부만/복호화는 서버 내부용) ----
-const SECRET_FIELDS = ["anthropicKey", "kieKey"];
+const SECRET_FIELDS = ["anthropicKey", "kieKey", "naverClientId", "naverClientSecret"];
 export function getSettingsRaw(userId) {
   const row = db.prepare("SELECT json FROM settings WHERE user_id=?").get(uid(userId));
   let s = {}; try { s = row ? JSON.parse(row.json) : {}; } catch {}
@@ -88,9 +90,9 @@ export function saveSettings(userId, patch) {
   return getSettings(userId);
 }
 
-// ---- 목적지 ----
+// ---- 계정(목적지/쿠션) : 다수, 플랫폼별, 역할별 ----
 export function listDestinations(userId) {
-  return db.prepare("SELECT id,name,platform,site_url,is_default FROM destinations WHERE user_id=? ORDER BY is_default DESC, created_at").all(uid(userId));
+  return db.prepare("SELECT id,name,platform,role,site_url,is_default FROM destinations WHERE user_id=? ORDER BY role, is_default DESC, created_at").all(uid(userId));
 }
 export function getDestination(userId, id) {
   const d = db.prepare("SELECT * FROM destinations WHERE user_id=? AND id=?").get(uid(userId), id);
@@ -98,20 +100,26 @@ export function getDestination(userId, id) {
   return d;
 }
 export function upsertDestination(userId, dst) {
-  const id = dst.id || rid("dst");
+  const id = dst.id || rid("acc");
   const creds = dst.creds ? enc(JSON.stringify(dst.creds)) : (dst.id ? undefined : "");
-  if (dst.is_default) db.prepare("UPDATE destinations SET is_default=0 WHERE user_id=?").run(uid(userId));
+  const role = dst.role || "destination";
+  // 같은 역할 내 기본 1개
+  if (dst.is_default) db.prepare("UPDATE destinations SET is_default=0 WHERE user_id=? AND role=?").run(uid(userId), role);
   const ex = db.prepare("SELECT id FROM destinations WHERE user_id=? AND id=?").get(uid(userId), id);
   if (ex) {
-    db.prepare("UPDATE destinations SET name=?,platform=?,site_url=?,is_default=?" + (creds !== undefined ? ",creds=?" : "") + " WHERE user_id=? AND id=?")
-      .run(...[dst.name, dst.platform, dst.site_url, dst.is_default ? 1 : 0, ...(creds !== undefined ? [creds] : []), uid(userId), id]);
+    db.prepare("UPDATE destinations SET name=?,platform=?,role=?,site_url=?,is_default=?" + (creds !== undefined ? ",creds=?" : "") + " WHERE user_id=? AND id=?")
+      .run(...[dst.name, dst.platform, role, dst.site_url, dst.is_default ? 1 : 0, ...(creds !== undefined ? [creds] : []), uid(userId), id]);
   } else {
-    db.prepare("INSERT INTO destinations(id,user_id,name,platform,site_url,creds,is_default,created_at) VALUES(?,?,?,?,?,?,?,?)")
-      .run(id, uid(userId), dst.name, dst.platform, dst.site_url, creds || "", dst.is_default ? 1 : 0, now());
+    db.prepare("INSERT INTO destinations(id,user_id,name,platform,role,site_url,creds,is_default,created_at) VALUES(?,?,?,?,?,?,?,?,?)")
+      .run(id, uid(userId), dst.name, dst.platform, role, dst.site_url, creds || "", dst.is_default ? 1 : 0, now());
   }
   return listDestinations(userId);
 }
 export function deleteDestination(userId, id) { db.prepare("DELETE FROM destinations WHERE user_id=? AND id=?").run(uid(userId), id); return listDestinations(userId); }
+// 생성 대상 계정 목록 (목적지 우선, 그다음 쿠션) — 계정별로 각각 다른 글 생성
+export function accountsForGeneration(userId) {
+  return db.prepare("SELECT id,name,platform,role,site_url FROM destinations WHERE user_id=? ORDER BY CASE role WHEN 'destination' THEN 0 WHEN 'both' THEN 1 ELSE 2 END, created_at").all(uid(userId));
+}
 
 // ---- 초안함 ----
 export function listDrafts(userId) { return db.prepare("SELECT id,date,status,title,content,keyword,source FROM drafts WHERE user_id=? ORDER BY date DESC").all(uid(userId)); }

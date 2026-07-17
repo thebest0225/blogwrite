@@ -74,6 +74,37 @@
       </details>
     </section>
 
+    <!-- 계정 관리 (다수: 목적지/쿠션, WP/블로거/네이버) -->
+    <details class="card" id="accountsCard">
+      <summary class="card-title" style="cursor:pointer;">🔑 계정 관리 <span class="muted">— 목적지·쿠션 블로그 계정(다수). 계정마다 각각 다른 글이 생성됩니다</span></summary>
+      <div id="accountsList" class="acc-list"></div>
+      <div class="acc-form">
+        <div class="grid2">
+          <label class="field"><span>계정 이름</span><input type="text" id="accName" placeholder="예: 내 워드프레스 A" /></label>
+          <label class="field"><span>플랫폼</span>
+            <select id="accPlatform"><option value="wordpress">워드프레스</option><option value="blogger">블로거</option><option value="naver">네이버</option></select>
+          </label>
+        </div>
+        <div class="grid2">
+          <label class="field"><span>역할</span>
+            <select id="accRole"><option value="destination">목적지</option><option value="cushion">쿠션</option><option value="both">겸용</option></select>
+          </label>
+          <label class="check" style="align-self:end;"><input type="checkbox" id="accDefault" /><span>이 역할의 기본 계정</span></label>
+        </div>
+        <label class="field"><span>사이트/블로그 주소</span><input type="text" id="accSite" placeholder="https://... (WP는 사이트 URL, 블로거는 블로그 주소)" /></label>
+        <div class="grid2" id="accWpCreds">
+          <label class="field"><span>WP 사용자명</span><input type="text" id="accWpUser" placeholder="워드프레스 계정" autocomplete="off" /></label>
+          <label class="field"><span>WP 앱 비밀번호</span><input type="password" id="accWpPw" placeholder="응용프로그램 비밀번호" autocomplete="off" /></label>
+        </div>
+        <p class="muted" id="accHint"></p>
+        <div class="row" style="justify-content:flex-end;gap:8px;">
+          <input type="hidden" id="accEditId" />
+          <button class="mini" id="accCancel">초기화</button>
+          <button class="mini primary-mini" id="accSave">계정 저장</button>
+        </div>
+      </div>
+    </details>
+
     <!-- 2) 순차 생성 -->
     <section class="card">
       <div class="card-title">2. 순차 생성</div>
@@ -125,7 +156,25 @@
   <dialog id="optionsDialog" class="optdlg">
     <form method="dialog" class="optform" id="optForm">
       <h3>설정</h3>
-      <p class="muted">API 키는 서버 <code>.env</code> 에서 관리됩니다. 여기서는 비민감 값만 저장됩니다.</p>
+      <p class="muted">내 계정 전용. API 키는 암호화되어 저장됩니다. (입력란을 비워두면 기존 키 유지)</p>
+
+      <div class="opt-sec">🔑 API 키 (내 계정)</div>
+      <label class="field"><span>Anthropic API 키 (Claude 웹서치 생성용) <span id="hasAnthropic" class="muted"></span></span>
+        <input type="password" id="optAnthropicKey" placeholder="sk-ant-... (비우면 유지)" autocomplete="off" />
+      </label>
+      <label class="field"><span>KIE API 키 (이미지 생성용) <span id="hasKie" class="muted"></span></span>
+        <input type="password" id="optKieKey" placeholder="비우면 유지" autocomplete="off" />
+      </label>
+      <div class="grid2">
+        <label class="field"><span>네이버 Client ID <span id="hasNid" class="muted"></span></span>
+          <input type="password" id="optNaverId" placeholder="비우면 유지" autocomplete="off" />
+        </label>
+        <label class="field"><span>네이버 Client Secret <span id="hasNsec" class="muted"></span></span>
+          <input type="password" id="optNaverSecret" placeholder="비우면 유지" autocomplete="off" />
+        </label>
+      </div>
+
+      <div class="opt-sec">✍️ 생성 설정</div>
       <label class="field"><span>글 생성 엔진</span>
         <select id="optEngine">
           <option value="claude">Claude API (웹서치 O · 링크 정확 · 권장)</option>

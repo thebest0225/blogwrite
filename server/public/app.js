@@ -44,6 +44,9 @@ const storeList = () => apiJson("/api/store").then((j) => j.records || []);
 const storeAdd = (rec) => apiJson("/api/store", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rec) }).catch(() => {});
 const storeDelete = (url) => apiJson("/api/store/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) }).catch(() => {});
 const wpCreatePost = ({ title, content, status }) => apiJson("/api/wp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, content, status }) });
+const accountsApi = () => apiJson("/api/destinations").then((j) => j.destinations || []);
+const accountSave = (dst) => apiJson("/api/destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dst) });
+const accountDelete = (id) => apiJson("/api/destinations/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
 const draftsList = () => apiJson("/api/drafts").then((j) => j.drafts || []);
 const draftDelete = (id) => apiJson("/api/drafts/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).catch(() => {});
 const draftStatus = (id, status) => apiJson("/api/drafts/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }) }).catch(() => {});
@@ -77,11 +80,72 @@ async function init() {
   $("trendBox").addEventListener("toggle", (e) => { if (e.target.open) renderTrends(false); });
   $("draftsRefresh").addEventListener("click", renderDrafts);
   $("draftsBox").addEventListener("toggle", (e) => { if (e.target.open) renderDrafts(); });
+  $("accountsCard").addEventListener("toggle", (e) => { if (e.target.open) renderAccounts(); });
+  $("accPlatform").addEventListener("change", updateAccForm);
+  $("accSave").addEventListener("click", onAccountSave);
+  $("accCancel").addEventListener("click", resetAccForm);
   $("optClose").addEventListener("click", () => $("optionsDialog").close());
   $("optSave").addEventListener("click", onSaveOptions);
 
   renderMyPosts();
   renderDrafts();
+}
+
+// ---------- 계정 관리 ----------
+const PLAT_LABEL = { wordpress: "워드프레스", blogger: "블로거", naver: "네이버" };
+const ROLE_LABEL = { destination: "목적지", cushion: "쿠션", both: "겸용" };
+function updateAccForm() {
+  const p = $("accPlatform").value;
+  $("accWpCreds").style.display = p === "wordpress" ? "" : "none";
+  $("accHint").textContent = p === "wordpress" ? "WP: 사이트 URL + 사용자명 + 응용프로그램 비밀번호(자동발행용)"
+    : p === "blogger" ? "블로거: 블로그 주소 입력. 자동발행은 구글 OAuth 연동 필요(추후). 지금은 HTML 복사용."
+    : "네이버: 블로그 주소 입력. 자동발행 불가 → HTML 복사용.";
+}
+function resetAccForm() {
+  $("accEditId").value = ""; $("accName").value = ""; $("accSite").value = "";
+  $("accWpUser").value = ""; $("accWpPw").value = ""; $("accDefault").checked = false;
+  $("accPlatform").value = "wordpress"; $("accRole").value = "destination"; updateAccForm();
+  $("accSave").textContent = "계정 저장";
+}
+async function renderAccounts() {
+  const box = $("accountsList"); let accs = []; try { accs = await accountsApi(); } catch {}
+  box.innerHTML = "";
+  if (!accs.length) { box.innerHTML = '<div class="hist-empty">등록된 계정이 없습니다. 아래에서 목적지/쿠션 계정을 추가하세요.</div>'; return; }
+  for (const a of accs) {
+    const row = document.createElement("div"); row.className = "acc-row";
+    const rc = a.role === "destination" ? "dest" : (a.role === "both" ? "both" : "cush");
+    row.innerHTML = `<span class="acc-badge ${rc}">${ROLE_LABEL[a.role] || a.role}</span>`
+      + `<span class="nm">${a.name || "(이름없음)"}</span>`
+      + `<span class="acc-plat">${PLAT_LABEL[a.platform] || a.platform}</span>`
+      + (a.is_default ? '<span class="df">기본</span>' : "");
+    const edit = document.createElement("button"); edit.className = "hist-del"; edit.textContent = "✎"; edit.title = "수정";
+    edit.addEventListener("click", () => loadAccForEdit(a));
+    const del = document.createElement("button"); del.className = "hist-del"; del.textContent = "✕";
+    del.addEventListener("click", async () => { if (confirm("계정을 삭제할까요?")) { await accountDelete(a.id); renderAccounts(); } });
+    row.appendChild(edit); row.appendChild(del); box.appendChild(row);
+  }
+  updateAccForm();
+}
+function loadAccForEdit(a) {
+  $("accEditId").value = a.id; $("accName").value = a.name || ""; $("accPlatform").value = a.platform;
+  $("accRole").value = a.role || "destination"; $("accSite").value = a.site_url || "";
+  $("accDefault").checked = !!a.is_default; $("accWpUser").value = ""; $("accWpPw").value = "";
+  updateAccForm(); $("accSave").textContent = "수정 저장"; $("accHint").textContent += " (자격증명 비워두면 기존 유지)";
+  $("accountsCard").scrollIntoView({ behavior: "smooth" });
+}
+async function onAccountSave() {
+  const dst = {
+    id: $("accEditId").value || undefined,
+    name: $("accName").value.trim(), platform: $("accPlatform").value, role: $("accRole").value,
+    site_url: $("accSite").value.trim(), is_default: $("accDefault").checked
+  };
+  if (!dst.name) { setStatus("계정 이름을 입력하세요.", true); return; }
+  if (dst.platform === "wordpress") {
+    const u = $("accWpUser").value.trim(), pw = $("accWpPw").value.trim();
+    if (u || pw) dst.creds = { user: u, appPassword: pw };
+  }
+  try { await accountSave(dst); resetAccForm(); renderAccounts(); setStatus("✅ 계정 저장됨"); }
+  catch (e) { setStatus("계정 저장 실패: " + e.message, true); }
 }
 
 // ---------- 초안함 (MCP/Claude로 받은 초안) ----------
@@ -130,6 +194,12 @@ function tryParse(raw) { try { return parseJson(raw); } catch { return null; } }
 
 // ---------- 설정 모달 ----------
 function openOptions() {
+  // API 키: 존재여부 표시 + 입력란 비움(비우면 유지)
+  $("hasAnthropic").textContent = settings.hasAnthropicKey ? "· 설정됨" : "· 미설정(.env 폴백)";
+  $("hasKie").textContent = settings.hasKieKey ? "· 설정됨" : "· 미설정(.env 폴백)";
+  $("hasNid").textContent = settings.hasNaverClientId ? "· 설정됨" : "";
+  $("hasNsec").textContent = settings.hasNaverClientSecret ? "· 설정됨" : "";
+  ["optAnthropicKey", "optKieKey", "optNaverId", "optNaverSecret"].forEach((id) => { $(id).value = ""; });
   $("optEngine").value = settings.genEngine || "claude";
   $("optChatModel").value = settings.kieChatModel || "claude-sonnet-5";
   $("optThumbMode").value = settings.thumbnailMode || "ai_full";
@@ -149,11 +219,16 @@ async function onSaveOptions() {
   const patch = {
     genEngine: $("optEngine").value,
     kieChatModel: $("optChatModel").value, thumbnailMode: $("optThumbMode").value, imageResolution: $("optImgRes").value,
+    // 키는 입력했을 때만(비우면 유지)
+    ...($("optAnthropicKey").value.trim() ? { anthropicKey: $("optAnthropicKey").value.trim() } : {}),
+    ...($("optKieKey").value.trim() ? { kieKey: $("optKieKey").value.trim() } : {}),
+    ...($("optNaverId").value.trim() ? { naverClientId: $("optNaverId").value.trim() } : {}),
+    ...($("optNaverSecret").value.trim() ? { naverClientSecret: $("optNaverSecret").value.trim() } : {}),
     linkMode: $("optLinkMode").value, overlayAccent: $("optAccent").value, myBlogUrl: $("optMyBlog").value.trim(),
     defaultTone: $("optTone").value.trim(), defaultAudience: $("optAudience").value.trim(), authorBio: $("optAuthorBio").value.trim(),
     thumbnailStylePrompt: $("optThumbStyle").value.trim(), adEnabled: $("optAdEnabled").checked, adCode: $("optAdCode").value.trim()
   };
-  try { await saveSettings(patch); settings = await getSettings(); $("optionsDialog").close(); setStatus("✅ 설정 저장됨"); }
+  try { await saveSettings(patch); settings = await getSettings(); try { config = await apiJson("/api/config"); } catch {} if (!config.kieEnabled) {} $("apiWarn").classList.toggle("hidden", !!config.kieEnabled || !!config.claudeEnabled); $("optionsDialog").close(); setStatus("✅ 설정 저장됨"); }
   catch (e) { setStatus("설정 저장 실패: " + e.message, true); }
 }
 

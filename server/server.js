@@ -209,13 +209,15 @@ app.get("/api/trends", async (req, res) => {
   } catch (e) { res.json({ ts: Date.now(), items: [] }); }
 });
 
-// ---- 네이버 검색 (선택, 링크 그라운딩) ----
+// ---- 네이버 검색 (선택, 링크 그라운딩) — 사용자별 키 ----
 app.get("/api/naver-search", async (req, res) => {
-  if (!NAVER_ID) return res.json({ items: [] });
+  const nid = DB.getSecret(req.userId, "naverClientId") || NAVER_ID;
+  const nsec = DB.getSecret(req.userId, "naverClientSecret") || NAVER_SECRET;
+  if (!nid) return res.json({ items: [] });
   try {
     const q = req.query.q || ""; const out = [];
     for (const kind of ["webkr", "news", "blog"]) {
-      const r = await fetch(`https://openapi.naver.com/v1/search/${kind}.json?query=${encodeURIComponent(q)}&display=4`, { headers: { "X-Naver-Client-Id": NAVER_ID, "X-Naver-Client-Secret": NAVER_SECRET } });
+      const r = await fetch(`https://openapi.naver.com/v1/search/${kind}.json?query=${encodeURIComponent(q)}&display=4`, { headers: { "X-Naver-Client-Id": nid, "X-Naver-Client-Secret": nsec } });
       if (!r.ok) continue; const j = await r.json();
       for (const it of j.items || []) out.push({ kind, title: (it.title || "").replace(/<[^>]+>/g, ""), link: it.link });
     }
@@ -283,10 +285,12 @@ app.get("/api/config", (req, res) => {
     kieEnabled: !!s.kieKey || !!KIE,
     claudeEnabled: !!s.anthropicKey || !!ANTHROPIC_KEY,
     wpEnabled: DB.listDestinations(req.userId).some((d) => d.platform === "wordpress") || !!WP_SITE,
-    naverEnabled: !!NAVER_ID,
+    naverEnabled: !!s.naverClientId || !!NAVER_ID,
     defaultEngine: s.genEngine || DEFAULT_ENGINE
   });
 });
+// 생성 대상 계정 목록(계정마다 각각 다른 글 생성)
+app.get("/api/accounts", (req, res) => res.json({ accounts: DB.accountsForGeneration(req.userId) }));
 
 // ---- 기존 JSON → SQLite 1회 이관 (user 1) + .env WP를 기본 목적지로 ----
 function migrateOnce() {
