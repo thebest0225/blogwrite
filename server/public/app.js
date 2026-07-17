@@ -1119,7 +1119,7 @@ function renderCur() {
   $("metaLine").textContent = `[${cur.acc.name || PLAT_LABEL[cur.target] || cur.target}] ${cur.article.title || ""}` + (cur.resolvedType ? ` · 유형:${cur.resolvedType}` : "") + (cur.article.category ? ` · 카테고리:${cur.article.category}` : "") + `\n메타: ${cur.article.metaDescription || "-"}`;
   $("preview").srcdoc = buildPreviewDoc(cur.article.title || "", cur.html);
   $("wpActions").classList.toggle("hidden", cur.target !== "wordpress");
-  $("bloggerPublishBtn").classList.toggle("hidden", !(cur.target === "blogger" && cur.acc.has_creds));
+  $("bloggerPublishBtn").classList.toggle("hidden", cur.target !== "blogger");
   $("markPublishedBtn").classList.toggle("hidden", cur.target === "wordpress");
   $("mainUrlRow").classList.toggle("hidden", !isDestRole(cur.acc));
   $("preview").classList.toggle("hidden", editMode);
