@@ -216,6 +216,22 @@ app.get("/api/keywords", async (req, res) => {
   res.json({ keywords: [...found].filter(Boolean).slice(0, 60) });
 });
 
+// ---- Pexels 스톡 사진 검색(글 보강용) ----
+const PEXELS = process.env.PEXELS_API_KEY;
+app.get("/api/stock-photos", async (req, res) => {
+  const key = DB.getSecret(req.userId, "pexelsKey") || PEXELS;
+  if (!key) return res.json({ photos: [] });
+  const q = (req.query.q || "").toString().trim(); const n = Math.min(10, parseInt(req.query.n, 10) || 3);
+  if (!q) return res.json({ photos: [] });
+  try {
+    const r = await fetch(`https://api.pexels.com/v1/search?query=${encodeURIComponent(q)}&per_page=${n}&orientation=landscape`, { headers: { Authorization: key } });
+    if (!r.ok) return res.json({ photos: [] });
+    const j = await r.json();
+    const photos = (j.photos || []).map((p) => ({ url: p.src?.large || p.src?.medium || p.src?.original, page: p.url, photographer: p.photographer, alt: p.alt || q }));
+    res.json({ photos });
+  } catch { res.json({ photos: [] }); }
+});
+
 // ---- 트렌드 (구글 급상승 신 엔드포인트 + signal.bz 실검, 1h 캐시) ----
 let trendCache = null;
 const unescapeXml = (s) => (s || "").replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, "&").trim();
@@ -459,6 +475,7 @@ app.get("/api/config", (req, res) => {
     claudeEnabled: !!s.anthropicKey || !!ANTHROPIC_KEY,
     wpEnabled: DB.listDestinations(req.userId).some((d) => d.platform === "wordpress") || !!WP_SITE,
     naverEnabled: !!s.naverClientId || !!NAVER_ID,
+    pexelsEnabled: !!s.pexelsKey || !!PEXELS,
     googleOAuth: !!GOOGLE_ID,
     defaultEngine: s.genEngine || DEFAULT_ENGINE,
     newDrafts: DB.countNewDrafts(req.userId)

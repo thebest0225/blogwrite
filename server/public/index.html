@@ -226,6 +226,7 @@
             <label class="field"><span>네이버 Client ID <span id="hasNid" class="muted"></span></span><input type="password" id="optNaverId" autocomplete="off" /></label>
             <label class="field"><span>네이버 Client Secret <span id="hasNsec" class="muted"></span></span><input type="password" id="optNaverSecret" autocomplete="off" /></label>
           </div>
+          <label class="field"><span>Pexels API 키 (본문 실사 사진 보강 · 무료) <span id="hasPexels" class="muted"></span></span><input type="password" id="optPexelsKey" autocomplete="off" /></label>
           <div class="opt-sec"><iconify-icon icon="solar:pen-bold-duotone"></iconify-icon> 생성 설정</div>
           <div class="grid2">
             <label class="field"><span>글 생성 엔진</span><select id="optEngine"><option value="claude">Claude API (웹서치·권장)</option><option value="kie">KIE (저렴)</option></select></label>
@@ -239,6 +240,7 @@
             <label class="field"><span>링크 처리 <span class="muted">— 초안의 실제 링크는 항상 그대로 유지</span></span><select id="optLinkMode"><option value="preserve">원본·공식 링크 그대로 (권장)</option><option value="search">불명확한 링크는 검색으로 보완</option></select></label>
             <label class="field"><span>오버레이 액센트</span><input type="color" id="optAccent" value="#ff2d55" /></label>
           </div>
+          <label class="check"><input type="checkbox" id="optStockPhotos" /><span><b>Pexels 실사 사진 보강</b> — AI 이미지 개수 + 1장만큼 관련 실사 사진을 본문에 자동 삽입(글이 허전하지 않게). Pexels 키 필요.</span></label>
           <div class="opt-sec"><iconify-icon icon="solar:rocket-2-bold-duotone"></iconify-icon> 자동발행</div>
           <label class="check"><input type="checkbox" id="optAutoPublish" /><span>초안이 준비되면 <b>목적지 글을 자동 생성 + 워드프레스 자동발행</b> (부재중용). 블로거·네이버는 자동발행 대상이 아니면 작업보드에 남아 수동 발행.</span></label>
           <label class="field"><span>내 블로그/사이트 (기본 목적지)</span><input type="text" id="optMyBlog" /></label>

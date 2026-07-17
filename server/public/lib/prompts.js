@@ -77,9 +77,11 @@ const JSON_CONTRACT = `
   ],
   "faq": [{"q":"질문","a":"답변"}],
   "relatedKeywords": ["연관검색어1","..."],
+  "photoQueries": ["english stock photo query 1","english query 2","english query 3"],
   "tags": ["태그1","..."],
   "sources": [{"title":"출처/페이지 제목","url":"https://실제-접속되는-URL"}]
 }
+- photoQueries: 이 글에 어울리는 **스톡사진 검색어를 영어로 3~5개**(구체적 장면·사물·상황. 예: "samsung office building", "korean stock market chart", "business meeting negotiation"). 본문 사이에 넣을 실사 사진 검색에 쓰인다.
 - blocks 배열은 실제 글 흐름 순서대로 구성한다.
 - image 블록: 맨 앞 thumbnail 1개(썸네일, linkUrl 포함) + 나머지 body(1~2개는 linkUrl 포함 클릭형). 총 개수는 작성 조건의 '이미지 개수'를 정확히 따른다.
 - 인물 주제면 이미지 prompt에 실명·국적·외모를 상세히 넣어 실사로 재현되게 하고, alt에는 SEO 키워드를 포함한다.

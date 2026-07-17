@@ -173,12 +173,14 @@ function renderBlock(b, cfg) {
       // 모델이 클릭형으로 지정한 이미지만 링크로. URL은 검색결과로 안전하게 해석.
       const link = (b.linkUrl && b.linkUrl !== "#") ? resolveHref(b.linkUrl, b.alt || cfg.searchContext, cfg) : "";
       if (b.resolvedUrl) {
-        const img = `<img src="${esc(b.resolvedUrl)}" alt="${esc(b.alt || "")}" style="${S.img}"/>`;
+        const img = `<img src="${esc(b.resolvedUrl)}" alt="${esc(b.alt || "")}" loading="lazy" style="${S.img}"/>`;
+        // 출처(Pexels 등) 캡션
+        const credit = b.credit ? `<span style="display:block;text-align:center;color:#aaa;font-size:0.78em;margin-top:2px;">${b.creditUrl ? `<a href="${esc(b.creditUrl)}" target="_blank" rel="noopener nofollow" style="color:#aaa;text-decoration:none;">${esc(b.credit)}</a>` : esc(b.credit)}</span>` : "";
         // 클릭형 링크 이미지
         if (link) {
-          return `<a href="${esc(link)}" target="_blank" rel="noopener" style="text-decoration:none;">${img}${b.alt ? `<span style="display:block;text-align:center;color:#888;font-size:0.85em;margin-top:-4px;">${esc(b.alt)}</span>` : ""}</a>`;
+          return `<a href="${esc(link)}" target="_blank" rel="noopener" style="text-decoration:none;">${img}${b.alt ? `<span style="display:block;text-align:center;color:#888;font-size:0.85em;margin-top:-4px;">${esc(b.alt)}</span>` : ""}</a>${credit}`;
         }
-        return img;
+        return img + credit;
       }
       // 이미지 미생성 시 자리표시(클릭형이면 링크 표시)
       const badge = link ? " · 🔗클릭형" : "";

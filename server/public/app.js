@@ -14,7 +14,7 @@ const ASPECT_BY_TARGET = { blogger: "4:3", wp: "4:3", naver: "1:1" };
 const LABEL = { blogger: "블로거 메인", naver: "네이버", wp: "워드프레스" };
 
 const DEFAULT_THUMB_STYLE =
-`Korean YouTube-style clickbait thumbnail, 16:9 aspect ratio. Cinematic, high-contrast dramatic lighting with a moody atmospheric background that fits the article's actual topic. Big HEAVY bold Korean sans-serif headline with a thick black-and-white outline, placed in the TOP area with the bottom third kept clear; the Korean text must be large and PERFECTLY spelled. Clean, premium, readable at small size. NO cartoon mascots, stock graphs, arrows, flags, finance elements. Imagery matches the real subject.`;
+`Premium Korean YouTube-style thumbnail, high click-through, professional editorial quality, sharp focus, cinematic high-contrast dramatic lighting, atmospheric background matching the article's REAL topic. ADAPT the composition to the subject: (a) if a real person is central (celebrity/executive/politician/athlete) render a photorealistic dramatic portrait of that ONE person with expressive emotion and moody rim lighting; (b) if it's a product/object, a bold hero shot of that object; (c) if it's a concept/how-to/issue, a clean modern cinematic scene symbolizing it. Big HEAVY bold Korean sans-serif headline with thick black-and-white outline in the TOP area, bottom third kept clear; Korean text large and PERFECTLY spelled. Readable at small size. NO cartoon mascots, NO stock graphs/arrows/flags/finance clip-art, NO random extra people.`;
 
 const DEFAULTS = {
   genEngine: "claude", kieChatModel: "claude-sonnet-5", imageResolution: "1K",
@@ -22,7 +22,7 @@ const DEFAULTS = {
   linkMode: "preserve", myBlogUrl: "", defaultTone: "친근하고 신뢰감 있는",
   defaultAudience: "관련 정보를 처음 찾아보는 일반 독자",
   authorBio: "여러 분야의 정보를 직접 찾아보고, 최신 자료와 공식 출처를 확인해 이해하기 쉽게 정리합니다. 검색만으로는 흩어져 있던 내용을 한곳에 모아, 실제로 도움이 되는 알맹이만 담으려 합니다.",
-  adEnabled: false, adCode: "", internalLinks: false, generateImages: true, imageCount: 1, autoPublish: false
+  adEnabled: false, adCode: "", internalLinks: false, generateImages: true, imageCount: 1, autoPublish: false, stockPhotos: true
 };
 
 // ---------- API ----------
@@ -486,6 +486,9 @@ function populateSettings() {
   maskField("optKieKey", settings.hasKieKey, "");
   maskField("optNaverId", settings.hasNaverClientId, "");
   maskField("optNaverSecret", settings.hasNaverClientSecret, "");
+  maskField("optPexelsKey", settings.hasPexelsKey, "pexels.com/api 무료 발급");
+  $("hasPexels").textContent = settings.hasPexelsKey ? "· 설정됨" : "· 미설정";
+  $("optStockPhotos").checked = settings.stockPhotos !== false;
   function maskField(id, saved, empty) { const el = $(id); el.value = ""; el.placeholder = saved ? MASK : (empty || ""); el.classList.toggle("saved", !!saved); }
   $("optEngine").value = settings.genEngine || "claude";
   $("optChatModel").value = settings.kieChatModel || "claude-sonnet-5";
@@ -511,10 +514,11 @@ async function onSaveOptions() {
     ...($("optKieKey").value.trim() ? { kieKey: $("optKieKey").value.trim() } : {}),
     ...($("optNaverId").value.trim() ? { naverClientId: $("optNaverId").value.trim() } : {}),
     ...($("optNaverSecret").value.trim() ? { naverClientSecret: $("optNaverSecret").value.trim() } : {}),
+    ...($("optPexelsKey").value.trim() ? { pexelsKey: $("optPexelsKey").value.trim() } : {}),
     linkMode: $("optLinkMode").value, overlayAccent: $("optAccent").value, myBlogUrl: $("optMyBlog").value.trim(),
     defaultTone: $("optTone").value.trim(), defaultAudience: $("optAudience").value.trim(), authorBio: $("optAuthorBio").value.trim(),
     thumbnailStylePrompt: $("optThumbStyle").value.trim(), adEnabled: $("optAdEnabled").checked, adCode: $("optAdCode").value.trim(),
-    autoPublish: $("optAutoPublish").checked
+    autoPublish: $("optAutoPublish").checked, stockPhotos: $("optStockPhotos").checked
   };
   try { await saveSettings(patch); settings = await getSettings(); try { config = await apiJson("/api/config"); } catch {} $("apiWarn").classList.toggle("hidden", !!config.kieEnabled || !!config.claudeEnabled); populateSettings(); setStatus("✅ 설정 저장됨"); }
   catch (e) { setStatus("설정 저장 실패: " + e.message, true); }
@@ -819,7 +823,37 @@ async function finalizeForAccount(acc, article, keyword, destUrl) {
     const imgs = (article.blocks || []).filter((b) => b.type === "image"); let i = 0;
     for (const b of imgs) { i++; setStatus(`[${acc.name}] 이미지 ${i}/${imgs.length}…`); try { await genBlockImageAcc(acc, b, article, keyword); } catch (e) { console.warn(e); } }
   }
+  // Pexels 실사 사진으로 보강(AI 개수 + 1 비율). 글만 있어 허전하지 않게.
+  if (settings.stockPhotos !== false && config.pexelsEnabled) {
+    const aiN = $("genImages").checked ? (parseInt($("imgCount").value, 10) || 1) : 0;
+    try { await addStockPhotos(acc, article, keyword, Math.min(5, aiN + 1)); } catch (e) { console.warn(e); }
+  }
   return buildHtmlForAccount(acc, article, keyword, destUrl);
+}
+// Pexels 사진을 본문 소제목 사이에 배치
+async function addStockPhotos(acc, article, keyword, n) {
+  if (n <= 0) return;
+  let queries = Array.isArray(article.photoQueries) ? article.photoQueries.filter(Boolean) : [];
+  if (!queries.length) queries = [keyword];
+  const seen = new Set(), photos = [];
+  for (const q of queries) {
+    if (photos.length >= n) break;
+    try {
+      const r = await apiJson(`/api/stock-photos?q=${encodeURIComponent(q)}&n=3`);
+      for (const p of (r.photos || [])) { if (photos.length >= n) break; if (p.url && !seen.has(p.url)) { seen.add(p.url); photos.push(p); } }
+    } catch {}
+  }
+  if (!photos.length) return;
+  const blocks = article.blocks || [];
+  const headingIdx = blocks.map((b, i) => (b.type === "heading" && (b.level || 2) === 2 ? i : -1)).filter((i) => i >= 0);
+  // 삽입 위치(뒤에서부터 삽입해 인덱스 밀림 방지)
+  const spots = [];
+  photos.forEach((p, k) => { const hi = headingIdx[k + 1] !== undefined ? headingIdx[k + 1] : (headingIdx.length ? headingIdx[headingIdx.length - 1] + 1 : blocks.length); spots.push({ at: hi, p }); });
+  spots.sort((a, b) => b.at - a.at);
+  for (const s of spots) {
+    blocks.splice(Math.min(s.at, blocks.length), 0, { type: "image", slot: "body", resolvedUrl: s.p.url, alt: s.p.alt || keyword, credit: s.p.photographer ? `사진: ${s.p.photographer} / Pexels` : "Pexels", creditUrl: s.p.page || "https://www.pexels.com" });
+  }
+  article.blocks = blocks;
 }
 // 목적지/쿠션 글 생성 = 서드파티(KIE, 웹서치X). 초안(웹서치로 만든 원천자료)에서 정보 추출.
 function engineForMode() { return config.kieEnabled ? "kie" : "claude"; }
@@ -1017,6 +1051,24 @@ async function renderHistory() {
       a.innerHTML = `<iconify-icon icon="solar:square-top-down-linear"></iconify-icon> 열기`;
       row.appendChild(a);
     }
+    // URL 수정(수동발행인데 URL 못 넣은 경우 등)
+    const editUrl = document.createElement("button"); editUrl.className = "mini"; editUrl.innerHTML = `<iconify-icon icon="solar:pen-linear"></iconify-icon> URL`;
+    editUrl.title = "발행 주소 수정"; editUrl.addEventListener("click", async () => {
+      const u = prompt("발행된 글 주소(URL)를 입력/수정하세요:", w.published_url || "");
+      if (u === null) return; const url = u.trim();
+      await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: w.id, target: w.target, destination_id: w.destination_id, title: w.title || "", status: "published", published_url: url }) }).catch(() => {});
+      if (url && /^https?:\/\//.test(url)) { try { await saveMyPost({ title: w.title, url, keyword: "" }, ""); } catch {} }
+      setStatus("✅ 발행 주소를 수정했습니다."); renderHistory();
+    });
+    row.appendChild(editUrl);
+    // 작업으로 되돌리기(실수로 발행표시한 경우 → 작업보드로 복귀해 재발행)
+    const revert = document.createElement("button"); revert.className = "mini"; revert.innerHTML = `<iconify-icon icon="solar:undo-left-linear"></iconify-icon> 작업으로`;
+    revert.title = "작업보드로 되돌리기(다시 발행)"; revert.addEventListener("click", async () => {
+      if (!confirm("이 글을 작업보드로 되돌릴까요? (발행 기록에서 빠지고 다시 검수·발행할 수 있습니다)")) return;
+      await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: w.id, target: w.target, destination_id: w.destination_id, title: w.title || "", status: "generated" }) }).catch(() => {});
+      setStatus("↩️ 작업보드로 되돌렸습니다. 작업보드에서 다시 발행하세요."); renderHistory();
+    });
+    row.appendChild(revert);
     const del = document.createElement("button"); del.className = "hist-del"; del.textContent = "✕"; del.title = "기록 삭제";
     del.addEventListener("click", async () => { if (confirm("이 발행 기록을 삭제할까요? (실제 발행글은 그대로 유지됩니다)")) { await apiJson("/api/work/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: w.id }) }).catch(() => {}); renderHistory(); } });
     row.appendChild(del); box.appendChild(row);
