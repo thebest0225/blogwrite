@@ -618,7 +618,8 @@ async function runSchedule(s) {
     for (const acc of dests) {
       idxIn[acc.platform] = (idxIn[acc.platform] || 0) + 1;
       const variant = { index: idxIn[acc.platform], total: groups[acc.platform].length, persona: acc.persona || "" };
-      const built = buildBloggerMain({ sourceText: draftText, keyword, audience: st.defaultAudience, tone: st.defaultTone, authorBio: st.authorBio, today, imageCount: 1, reference: "", internalLinks: [], variant });
+      const ov = acc.overrides || {};
+      const built = buildBloggerMain({ sourceText: draftText, keyword, audience: ov.audience || st.defaultAudience, tone: ov.tone || st.defaultTone, authorBio: ov.authorBio || st.authorBio, today, imageCount: 1, reference: "", internalLinks: [], variant });
       let content = "";
       for (let attempt = 0; attempt < 2 && !content; attempt++) {
         try { content = await kieChat({ system: built.system, user: built.user, maxTokens: 16000, temperature: 0.8, model: CHAT_MODEL, prefillJson: true, apiKey: kKey }); }
@@ -626,7 +627,7 @@ async function runSchedule(s) {
       }
       const article = parseArticle(content);
       if (!article) continue;
-      article.today = today; article.keyword = keyword; if (st.authorBio) article.authorBio = st.authorBio;
+      article.today = today; article.keyword = keyword; const abio = ov.authorBio || st.authorBio; if (abio) article.authorBio = abio;
       const html = buildHtml(article, { accent: st.overlayAccent || "#e11d48", linkMode: st.linkMode || "preserve", adEnabled: st.adEnabled, adCode: st.adCode }).html;
       const wid = DB.upsertWorkItem(userId, { target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated" });
       made++;
@@ -672,11 +673,12 @@ async function processAutoDraft(userId, draft) {
   try {
     const today = new Date().toISOString().slice(0, 10);
     const keyword = draft.keyword || firstLine(draft.content);
-    const built = buildBloggerMain({ sourceText: draft.content || "", keyword, audience: st.defaultAudience, tone: st.defaultTone, authorBio: st.authorBio, today, imageCount: 1, reference: "", internalLinks: [], variant: { persona: acc.persona || "" } });
+    const ov = acc.overrides || {};
+    const built = buildBloggerMain({ sourceText: draft.content || "", keyword, audience: ov.audience || st.defaultAudience, tone: ov.tone || st.defaultTone, authorBio: ov.authorBio || st.authorBio, today, imageCount: 1, reference: "", internalLinks: [], variant: { persona: acc.persona || "" } });
     let content = "";
     for (let attempt = 0; attempt < 2 && !content; attempt++) { try { content = await kieChat({ system: built.system, user: built.user, maxTokens: 16000, temperature: 0.8, model: CHAT_MODEL, prefillJson: true, apiKey: kKey }); } catch (e) { if (attempt) throw e; await sleep(1200); } }
     const article = parseArticle(content); if (!article) throw new Error("파싱 실패");
-    article.today = today; article.keyword = keyword; if (st.authorBio) article.authorBio = st.authorBio;
+    article.today = today; article.keyword = keyword; const abio = ov.authorBio || st.authorBio; if (abio) article.authorBio = abio;
     const html = buildHtml(article, { accent: st.overlayAccent || "#e11d48", linkMode: st.linkMode || "preserve", adEnabled: st.adEnabled, adCode: st.adCode }).html;
     DB.upsertWorkItem(userId, { draft_id: draft.id, target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated" });
   } catch (e) { console.error("[auto-draft]", draft.id, e.message); }   // 실패해도 소비됨(재제출 가능)

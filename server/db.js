@@ -49,6 +49,8 @@ CREATE INDEX IF NOT EXISTS idx_sched_user ON schedules(user_id);
 try { db.exec("ALTER TABLE destinations ADD COLUMN role TEXT DEFAULT 'destination'"); } catch {}
 try { db.exec("ALTER TABLE destinations ADD COLUMN persona TEXT"); } catch {}
 try { db.exec("ALTER TABLE destinations ADD COLUMN topics TEXT"); } catch {}
+// 블로그별 오버라이드(톤/대상독자/저자소개/썸네일스타일) JSON. 비우면 전역 설정 사용
+try { db.exec("ALTER TABLE destinations ADD COLUMN overrides TEXT"); } catch {}
 // 초안 → 목적지 자동 배분(니치)용 컬럼
 try { db.exec("ALTER TABLE drafts ADD COLUMN dest_id TEXT"); } catch {}
 // 발행 방식(auto=자동발행 / manual=HTML 수동) 컬럼
@@ -110,13 +112,15 @@ export function saveSettings(userId, patch) {
 }
 
 // ---- 계정(목적지/쿠션) : 다수, 플랫폼별, 역할별 ----
+const _parseOv = (s) => { try { return s ? JSON.parse(s) : {}; } catch { return {}; } };
 export function listDestinations(userId) {
-  const rows = db.prepare("SELECT id,name,platform,role,site_url,is_default,persona,topics,creds FROM destinations WHERE user_id=? ORDER BY role, is_default DESC, created_at").all(uid(userId));
-  return rows.map((d) => { const has = !!(d.creds && d.creds.length); delete d.creds; return { ...d, has_creds: has }; });
+  const rows = db.prepare("SELECT id,name,platform,role,site_url,is_default,persona,topics,overrides,creds FROM destinations WHERE user_id=? ORDER BY role, is_default DESC, created_at").all(uid(userId));
+  return rows.map((d) => { const has = !!(d.creds && d.creds.length); delete d.creds; return { ...d, overrides: _parseOv(d.overrides), has_creds: has }; });
 }
 export function getDestination(userId, id) {
   const d = db.prepare("SELECT * FROM destinations WHERE user_id=? AND id=?").get(uid(userId), id);
   if (d && d.creds) { try { d.creds = JSON.parse(dec(d.creds)); } catch { d.creds = {}; } }
+  if (d) d.overrides = _parseOv(d.overrides);
   return d;
 }
 export function upsertDestination(userId, dst) {
@@ -128,20 +132,21 @@ export function upsertDestination(userId, dst) {
   const ex = db.prepare("SELECT id FROM destinations WHERE user_id=? AND id=?").get(uid(userId), id);
   const persona = dst.persona !== undefined ? dst.persona : null;
   const topics = dst.topics !== undefined ? dst.topics : null;
+  const overrides = dst.overrides !== undefined ? JSON.stringify(dst.overrides || {}) : null;
   if (ex) {
-    db.prepare("UPDATE destinations SET name=?,platform=?,role=?,site_url=?,is_default=?,persona=COALESCE(?,persona),topics=COALESCE(?,topics)" + (creds !== undefined ? ",creds=?" : "") + " WHERE user_id=? AND id=?")
-      .run(...[dst.name, dst.platform, role, dst.site_url, dst.is_default ? 1 : 0, persona, topics, ...(creds !== undefined ? [creds] : []), uid(userId), id]);
+    db.prepare("UPDATE destinations SET name=?,platform=?,role=?,site_url=?,is_default=?,persona=COALESCE(?,persona),topics=COALESCE(?,topics),overrides=COALESCE(?,overrides)" + (creds !== undefined ? ",creds=?" : "") + " WHERE user_id=? AND id=?")
+      .run(...[dst.name, dst.platform, role, dst.site_url, dst.is_default ? 1 : 0, persona, topics, overrides, ...(creds !== undefined ? [creds] : []), uid(userId), id]);
   } else {
-    db.prepare("INSERT INTO destinations(id,user_id,name,platform,role,site_url,creds,is_default,persona,topics,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
-      .run(id, uid(userId), dst.name, dst.platform, role, dst.site_url, creds || "", dst.is_default ? 1 : 0, persona || "", topics || "", now());
+    db.prepare("INSERT INTO destinations(id,user_id,name,platform,role,site_url,creds,is_default,persona,topics,overrides,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
+      .run(id, uid(userId), dst.name, dst.platform, role, dst.site_url, creds || "", dst.is_default ? 1 : 0, persona || "", topics || "", overrides || "{}", now());
   }
   return listDestinations(userId);
 }
 export function deleteDestination(userId, id) { db.prepare("DELETE FROM destinations WHERE user_id=? AND id=?").run(uid(userId), id); return listDestinations(userId); }
 // 생성 대상 계정 목록 (목적지 우선, 그다음 쿠션) — 계정별로 각각 다른 글 생성
 export function accountsForGeneration(userId) {
-  const rows = db.prepare("SELECT id,name,platform,role,site_url,persona,topics,creds FROM destinations WHERE user_id=? ORDER BY CASE role WHEN 'destination' THEN 0 WHEN 'both' THEN 1 ELSE 2 END, created_at").all(uid(userId));
-  return rows.map((d) => { const has = !!(d.creds && d.creds.length); delete d.creds; return { ...d, has_creds: has }; });
+  const rows = db.prepare("SELECT id,name,platform,role,site_url,persona,topics,overrides,creds FROM destinations WHERE user_id=? ORDER BY CASE role WHEN 'destination' THEN 0 WHEN 'both' THEN 1 ELSE 2 END, created_at").all(uid(userId));
+  return rows.map((d) => { const has = !!(d.creds && d.creds.length); delete d.creds; return { ...d, overrides: _parseOv(d.overrides), has_creds: has }; });
 }
 
 // ---- 초안 → 목적지 니치 자동 분류 ----

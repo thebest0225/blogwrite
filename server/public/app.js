@@ -255,6 +255,7 @@ function updateAccForm() {
 }
 function resetAccForm() {
   $("accEditId").value = ""; $("accName").value = ""; $("accSite").value = ""; $("accPersona").value = ""; $("accTopics").value = "";
+  ["accTone", "accAudience", "accAuthorBio", "accThumbStyle"].forEach((id) => { $(id).value = ""; });
   const uEl = $("accWpUser"), pEl = $("accWpPw");
   uEl.value = ""; pEl.value = ""; uEl.placeholder = ""; pEl.placeholder = ""; uEl.classList.remove("saved"); pEl.classList.remove("saved");
   $("accDefault").checked = false;
@@ -288,6 +289,8 @@ function loadAccForEdit(a) {
   $("accRole").value = a.role || "destination"; $("accSite").value = a.site_url || "";
   $("accTopics").value = a.topics || "";
   $("accPersona").value = a.persona || "";
+  const ov = a.overrides || {};
+  $("accTone").value = ov.tone || ""; $("accAudience").value = ov.audience || ""; $("accAuthorBio").value = ov.authorBio || ""; $("accThumbStyle").value = ov.thumbStyle || "";
   $("accDefault").checked = !!a.is_default;
   const saved = !!a.has_creds;
   const uEl = $("accWpUser"), pEl = $("accWpPw");
@@ -317,7 +320,8 @@ async function onAccountSave() {
     id: $("accEditId").value || undefined,
     name: $("accName").value.trim(), platform: $("accPlatform").value, role: $("accRole").value,
     site_url: $("accSite").value.trim(), is_default: $("accDefault").checked,
-    persona: $("accPersona").value.trim(), topics: $("accTopics").value.trim()
+    persona: $("accPersona").value.trim(), topics: $("accTopics").value.trim(),
+    overrides: { tone: $("accTone").value.trim(), audience: $("accAudience").value.trim(), authorBio: $("accAuthorBio").value.trim(), thumbStyle: $("accThumbStyle").value.trim() }
   };
   if (!dst.name) { setStatus("계정 이름을 입력하세요.", true); return; }
   if (dst.platform === "wordpress") {
@@ -767,7 +771,8 @@ function accountStyle(acc) {
 function promptForAccount(acc, keyword, variant, destUrl, reference) {
   const sourceText = $("originalText").value.trim();
   const v = { ...(variant || {}), style: accountStyle(acc).vibe, persona: acc.persona || "" };   // 블로그별 톤·페르소나 주입
-  const common = { keyword, audience: settings.defaultAudience, tone: settings.defaultTone, authorBio: settings.authorBio, today: todayStr(), imageCount: parseInt($("imgCount").value, 10) || 1, variant: v, reference };
+  const ov = acc.overrides || {};   // 블로그별 오버라이드(비우면 전역 기본)
+  const common = { keyword, audience: ov.audience || settings.defaultAudience, tone: ov.tone || settings.defaultTone, authorBio: ov.authorBio || settings.authorBio, today: todayStr(), imageCount: parseInt($("imgCount").value, 10) || 1, variant: v, reference };
   // 목적지 모드 = 목적지 글, 쿠션 모드 = 쿠션 글 (계정 역할이 겸용이어도 현재 모드 기준)
   if (genMode === "destination") return buildBloggerMain({ ...common, sourceText, internalLinks: [] });
   return buildCushionPrompt(acc.platform === "naver" ? "naver" : "blogger", { ...common, sourceText, bloggerUrl: destUrl });
@@ -785,7 +790,7 @@ async function genBlockImageAcc(acc, b, article, keyword) {
   const isThumb = b.slot === "thumbnail";
   const headline = (b.overlayText || article.title || keyword || "").slice(0, 40);
   let genPrompt = b.prompt || b.alt || keyword;
-  const thumbStyle = settings.thumbnailStylePrompt || DEFAULT_THUMB_STYLE;
+  const thumbStyle = (acc.overrides && acc.overrides.thumbStyle) || settings.thumbnailStylePrompt || DEFAULT_THUMB_STYLE;
   if (isThumb && settings.thumbnailMode === "ai_full") {
     genPrompt = `${thumbStyle}\n\nScene: ${b.prompt || keyword}\n\nRender this EXACT Korean headline, HUGE and bold in the TOP area, perfectly spelled, with a solid highlight box behind the single most important word: "${headline}"\n\nHARD RULES: strong subject-vs-background pop (glow/rim light, shallow DOF), high-contrast punchy but CLEAN composition. If a real person is central show ONLY ONE person with clear emotion; otherwise a bold symbolic scene with NO random people. Bottom third clear. NO cartoon mascot, NO clip-art graphs/arrows/flags/finance icons, NO messy collage.`;
   }
@@ -869,7 +874,7 @@ function buildHtmlForAccount(acc, article, keyword, destUrl) {
   }
 }
 async function finalizeForAccount(acc, article, keyword, destUrl) {
-  article.today = todayStr(); article.authorBio = settings.authorBio; article.keyword = keyword;
+  article.today = todayStr(); article.authorBio = (acc.overrides && acc.overrides.authorBio) || settings.authorBio; article.keyword = keyword;
   const isNaver = acc.platform === "naver";
   if (genMode === "destination") ensureTopLinkcard("destination", article, keyword, lastMyPosts, "");
   else if (isNaver) ensureNaverFunnel(article, keyword, lastMyPosts, destUrl);

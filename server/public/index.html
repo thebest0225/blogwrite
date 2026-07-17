@@ -187,6 +187,13 @@
           <label class="field"><span>사이트/블로그 주소</span><input type="text" id="accSite" placeholder="https://... (WP=사이트 URL, 블로거=블로그 주소)" /></label>
           <label class="field"><span>주제·니치 키워드 <span class="muted">— 이 블로그가 다루는 주제(쉼표 구분). 초안이 들어오면 주제가 맞는 목적지가 자동 체크됩니다. 예: "정부지원,지원금,혜택,생활정보,절약"</span></span><input type="text" id="accTopics" placeholder="예: 정부지원, 혜택, 경제, 재테크" /></label>
           <label class="field"><span>블로그 페르소나·말투 <span class="muted">— 이 블로그 글의 화자 정체성(1인칭). 예: "30대 직장인, 정부지원 직접 챙기는 실속파. 담백하고 친근하게, 이모지 살짝"</span></span><textarea id="accPersona" rows="2" placeholder="비워두면 기본 톤으로 작성"></textarea></label>
+          <div class="opt-sec" style="margin-top:6px;"><iconify-icon icon="solar:tuning-2-linear"></iconify-icon> 이 블로그 전용 설정 <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;">(비우면 전역 기본값 사용)</span></div>
+          <div class="grid2">
+            <label class="field"><span>기본 톤</span><input type="text" id="accTone" placeholder="비우면 기본값" /></label>
+            <label class="field"><span>대상 독자</span><input type="text" id="accAudience" placeholder="비우면 기본값" /></label>
+          </div>
+          <label class="field"><span>저자 소개 (이 블로그 하단 표기)</span><textarea id="accAuthorBio" rows="2" placeholder="비우면 기본 저자 소개"></textarea></label>
+          <label class="field"><span>썸네일 스타일 지시</span><textarea id="accThumbStyle" rows="2" placeholder="비우면 기본 썸네일 스타일"></textarea></label>
           <div class="grid2" id="accWpCreds">
             <label class="field"><span>WP 사용자명</span><input type="text" id="accWpUser" autocomplete="off" /></label>
             <label class="field"><span>WP 앱 비밀번호</span><input type="password" id="accWpPw" autocomplete="off" /></label>
@@ -251,14 +258,15 @@
           <label class="check"><input type="checkbox" id="optStockPhotos" /><span><b>Pexels 실사 사진 보강</b> — AI 이미지 개수 + 1장만큼 관련 실사 사진을 본문에 자동 삽입(글이 허전하지 않게). Pexels 키 필요.</span></label>
           <div class="opt-sec"><iconify-icon icon="solar:rocket-2-bold-duotone"></iconify-icon> 자동발행</div>
           <label class="check"><input type="checkbox" id="optAutoProcessDrafts" /><span><b>초안 자동 처리</b> — 초안함에 들어온 초안(MCP·AI초안)을 니치 맞는 목적지 글로 <b>자동 생성해 작업보드에 올림</b>(발행은 안 함). 당신은 작업보드부터 검토·발행만 하면 됩니다.</span></label>
-          <label class="check"><input type="checkbox" id="optAutoPublish" /><span>초안이 준비되면 <b>목적지 글을 자동 생성 + 워드프레스 자동발행</b> (부재중용). 블로거·네이버는 자동발행 대상이 아니면 작업보드에 남아 수동 발행.</span></label>
+          <label class="check"><input type="checkbox" id="optAutoPublish" /><span>초안이 준비되면 <b>목적지 글을 자동 생성 + 자동발행</b> (부재중용). <b>워드프레스·블로거</b>(연결됨)는 자동발행, <b>네이버</b>만 자동발행 불가라 작업보드에 남아 HTML 수동 발행.</span></label>
+          <div class="opt-sec"><iconify-icon icon="solar:global-linear"></iconify-icon> 전역 기본값 <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;">— 계정별 설정이 비어있을 때 사용됩니다(블로그마다 다르게 하려면 계정 관리에서 설정)</span></div>
           <label class="field"><span>내 블로그/사이트 (기본 목적지)</span><input type="text" id="optMyBlog" /></label>
           <div class="grid2">
-            <label class="field"><span>기본 톤</span><input type="text" id="optTone" /></label>
-            <label class="field"><span>대상 독자</span><input type="text" id="optAudience" /></label>
+            <label class="field"><span>기본 톤 <span class="muted">(기본값)</span></span><input type="text" id="optTone" /></label>
+            <label class="field"><span>대상 독자 <span class="muted">(기본값)</span></span><input type="text" id="optAudience" /></label>
           </div>
-          <label class="field"><span>저자 소개 (E-E-A-T)</span><textarea id="optAuthorBio" rows="2"></textarea></label>
-          <label class="field"><span>썸네일 스타일 지시 (비우면 기본)</span><textarea id="optThumbStyle" rows="2"></textarea></label>
+          <label class="field"><span>저자 소개 (기본값)</span><textarea id="optAuthorBio" rows="2"></textarea></label>
+          <label class="field"><span>썸네일 스타일 지시 (기본값)</span><textarea id="optThumbStyle" rows="2"></textarea></label>
           <label class="check"><input type="checkbox" id="optAdEnabled" /><span>애드센스 광고 자동 삽입</span></label>
           <label class="field"><span>광고 유닛 HTML</span><textarea id="optAdCode" rows="2"></textarea></label>
           <div class="row" style="justify-content:flex-end;"><button class="primary" id="optSave" style="width:auto;padding:11px 24px;">설정 저장</button></div>
