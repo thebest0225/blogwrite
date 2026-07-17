@@ -83,7 +83,8 @@ async function init() {
   $("goAccounts")?.addEventListener("click", (e) => { e.preventDefault(); showView("accounts"); });
   $("genAll").addEventListener("click", generateAll);
   $("genDraft").addEventListener("click", generateDraft);
-  $("originalText").addEventListener("input", () => { activeDraftId = null; if (genMode !== "draft") $("genKeyword").value = deriveTopic(); });  // 수동 편집/붙여넣기 = 새 초안 + 주제 재추출
+  $("originalText").addEventListener("input", () => { activeDraftId = null; if (genMode !== "draft") { $("genKeyword").value = deriveTopic(); autoSelectAccountsByTopic(true); } });  // 수동 편집/붙여넣기 = 새 초안 + 주제 재추출 + 목적지 자동선택
+  $("genKeyword").addEventListener("input", () => autoSelectAccountsByTopic(true));
   $("copyDraftPrompt").addEventListener("click", copyDraftPromptText);
   document.querySelectorAll(".mode-tab").forEach((b) => b.addEventListener("click", () => setGenMode(b.dataset.mode)));
   $("editToggle").addEventListener("click", toggleEdit);
@@ -200,8 +201,28 @@ function setGenMode(mode) {
     isDraft ? "키워드를 넣고 <b>AI 초안 생성</b>을 누르면 Claude가 웹서치로 정보·연관검색어·링크가 풍부한 <b>초안</b>을 만듭니다. 완성되면 <b>② 목적지</b> 탭으로 넘어가세요. (직접 쓴 초안을 붙여넣어도 됩니다)"
     : isCush ? "발행된 <b>목적지 글</b>을 고르면, 초안+목적지를 함께 참고해 새 정보·연관검색어를 더한 <b>쿠션</b>을 계정별로 생성합니다."
     : "초안(원본)으로 <b>목적지 계정</b>에 발행용 완성글을 생성합니다. 생성 후 작업보드에서 발행하면 URL이 생겨요.";
-  refreshAccounts();
+  refreshAccounts().then(() => { if (mode !== "draft") autoSelectAccountsByTopic(true); });
   if (isCush) loadCushDests();
+}
+// 초안 주제 ↔ 계정 topics 매칭 점수
+function accountTopicMatch(acc, text) {
+  const topics = (acc.topics || "").split(/[,\n]/).map((t) => t.trim().toLowerCase()).filter((t) => t.length >= 2);
+  if (!topics.length) return 0;
+  const hay = (text || "").toLowerCase();
+  let s = 0; for (const t of topics) if (hay.includes(t)) s++;
+  return s;
+}
+// 니치 매칭으로 목적지 자동 체크 (매칭되는 게 있을 때만; 없으면 기존 유지)
+function autoSelectAccountsByTopic(silent) {
+  const box = $("genAccPick"); if (!box) return;
+  const inputs = [...box.querySelectorAll("input")]; if (!inputs.length) return;
+  const list = accountsForMode(); const amap = {}; list.forEach((a) => (amap[a.id] = a));
+  if (!list.some((a) => (a.topics || "").trim())) return;   // 주제 미설정이면 자동선택 안 함
+  const text = ($("genKeyword").value || "") + " " + ($("originalText").value || "").slice(0, 800);
+  const scored = inputs.map((i) => ({ i, s: amap[i.value] ? accountTopicMatch(amap[i.value], text) : 0 }));
+  if (!scored.some((x) => x.s > 0)) return;                 // 매칭 없으면 기존 유지
+  scored.forEach((x) => { x.i.checked = x.s > 0; });
+  if (!silent) setStatus("니치 매칭으로 목적지를 자동 선택했어요(체크는 수동으로 바꿀 수 있어요).");
 }
 let cushAssets = [];
 async function loadCushDests() {
@@ -223,7 +244,7 @@ function updateAccForm() {
     : "네이버: 블로그 주소 입력. 자동발행 불가 → HTML 복사식.";
 }
 function resetAccForm() {
-  $("accEditId").value = ""; $("accName").value = ""; $("accSite").value = ""; $("accPersona").value = "";
+  $("accEditId").value = ""; $("accName").value = ""; $("accSite").value = ""; $("accPersona").value = ""; $("accTopics").value = "";
   const uEl = $("accWpUser"), pEl = $("accWpPw");
   uEl.value = ""; pEl.value = ""; uEl.placeholder = ""; pEl.placeholder = ""; uEl.classList.remove("saved"); pEl.classList.remove("saved");
   $("accDefault").checked = false;
@@ -255,6 +276,7 @@ async function renderAccounts() {
 function loadAccForEdit(a) {
   $("accEditId").value = a.id; $("accName").value = a.name || ""; $("accPlatform").value = a.platform;
   $("accRole").value = a.role || "destination"; $("accSite").value = a.site_url || "";
+  $("accTopics").value = a.topics || "";
   $("accPersona").value = a.persona || "";
   $("accDefault").checked = !!a.is_default;
   const saved = !!a.has_creds;
@@ -285,7 +307,7 @@ async function onAccountSave() {
     id: $("accEditId").value || undefined,
     name: $("accName").value.trim(), platform: $("accPlatform").value, role: $("accRole").value,
     site_url: $("accSite").value.trim(), is_default: $("accDefault").checked,
-    persona: $("accPersona").value.trim()
+    persona: $("accPersona").value.trim(), topics: $("accTopics").value.trim()
   };
   if (!dst.name) { setStatus("계정 이름을 입력하세요.", true); return; }
   if (dst.platform === "wordpress") {
@@ -399,9 +421,9 @@ async function loadDraft(id, title) {
   $("originalText").value = d.content || "";
   activeDraftId = d.id;
   showView("new");
-  setGenMode("destination");
   $("genKeyword").value = d.keyword || deriveTopic();
-  setStatus(`📥 초안 "${d.title || title}" 불러옴. 계정을 고르고 '목적지 생성'을 누르세요.`);
+  setGenMode("destination");   // refreshAccounts 후 니치 매칭 자동선택(genKeyword 반영됨)
+  setStatus(`📥 초안 "${d.title || title}" 불러옴. 니치에 맞는 목적지가 자동 체크됩니다(수정 가능).`);
 }
 
 function setStatus(msg, isError = false) { const el = $("status"); el.textContent = msg; el.classList.remove("hidden"); el.classList.toggle("error", isError); if (progressOpen && !isError) progressStep(msg); }

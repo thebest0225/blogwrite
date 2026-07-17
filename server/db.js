@@ -48,6 +48,7 @@ CREATE INDEX IF NOT EXISTS idx_sched_user ON schedules(user_id);
 // 계정 역할(목적지/쿠션/겸용) 컬럼 (기존 테이블에도 추가)
 try { db.exec("ALTER TABLE destinations ADD COLUMN role TEXT DEFAULT 'destination'"); } catch {}
 try { db.exec("ALTER TABLE destinations ADD COLUMN persona TEXT"); } catch {}
+try { db.exec("ALTER TABLE destinations ADD COLUMN topics TEXT"); } catch {}
 // 발행 방식(auto=자동발행 / manual=HTML 수동) 컬럼
 try { db.exec("ALTER TABLE work_items ADD COLUMN publish_mode TEXT"); } catch {}
 // 예약 확장 컬럼 (초안/키워드 소스, 실행일시, 범위, 발행수준, 상태)
@@ -107,7 +108,7 @@ export function saveSettings(userId, patch) {
 
 // ---- 계정(목적지/쿠션) : 다수, 플랫폼별, 역할별 ----
 export function listDestinations(userId) {
-  const rows = db.prepare("SELECT id,name,platform,role,site_url,is_default,persona,creds FROM destinations WHERE user_id=? ORDER BY role, is_default DESC, created_at").all(uid(userId));
+  const rows = db.prepare("SELECT id,name,platform,role,site_url,is_default,persona,topics,creds FROM destinations WHERE user_id=? ORDER BY role, is_default DESC, created_at").all(uid(userId));
   return rows.map((d) => { const has = !!(d.creds && d.creds.length); delete d.creds; return { ...d, has_creds: has }; });
 }
 export function getDestination(userId, id) {
@@ -123,19 +124,20 @@ export function upsertDestination(userId, dst) {
   if (dst.is_default) db.prepare("UPDATE destinations SET is_default=0 WHERE user_id=? AND role=?").run(uid(userId), role);
   const ex = db.prepare("SELECT id FROM destinations WHERE user_id=? AND id=?").get(uid(userId), id);
   const persona = dst.persona !== undefined ? dst.persona : null;
+  const topics = dst.topics !== undefined ? dst.topics : null;
   if (ex) {
-    db.prepare("UPDATE destinations SET name=?,platform=?,role=?,site_url=?,is_default=?,persona=COALESCE(?,persona)" + (creds !== undefined ? ",creds=?" : "") + " WHERE user_id=? AND id=?")
-      .run(...[dst.name, dst.platform, role, dst.site_url, dst.is_default ? 1 : 0, persona, ...(creds !== undefined ? [creds] : []), uid(userId), id]);
+    db.prepare("UPDATE destinations SET name=?,platform=?,role=?,site_url=?,is_default=?,persona=COALESCE(?,persona),topics=COALESCE(?,topics)" + (creds !== undefined ? ",creds=?" : "") + " WHERE user_id=? AND id=?")
+      .run(...[dst.name, dst.platform, role, dst.site_url, dst.is_default ? 1 : 0, persona, topics, ...(creds !== undefined ? [creds] : []), uid(userId), id]);
   } else {
-    db.prepare("INSERT INTO destinations(id,user_id,name,platform,role,site_url,creds,is_default,persona,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
-      .run(id, uid(userId), dst.name, dst.platform, role, dst.site_url, creds || "", dst.is_default ? 1 : 0, persona || "", now());
+    db.prepare("INSERT INTO destinations(id,user_id,name,platform,role,site_url,creds,is_default,persona,topics,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
+      .run(id, uid(userId), dst.name, dst.platform, role, dst.site_url, creds || "", dst.is_default ? 1 : 0, persona || "", topics || "", now());
   }
   return listDestinations(userId);
 }
 export function deleteDestination(userId, id) { db.prepare("DELETE FROM destinations WHERE user_id=? AND id=?").run(uid(userId), id); return listDestinations(userId); }
 // 생성 대상 계정 목록 (목적지 우선, 그다음 쿠션) — 계정별로 각각 다른 글 생성
 export function accountsForGeneration(userId) {
-  const rows = db.prepare("SELECT id,name,platform,role,site_url,persona,creds FROM destinations WHERE user_id=? ORDER BY CASE role WHEN 'destination' THEN 0 WHEN 'both' THEN 1 ELSE 2 END, created_at").all(uid(userId));
+  const rows = db.prepare("SELECT id,name,platform,role,site_url,persona,topics,creds FROM destinations WHERE user_id=? ORDER BY CASE role WHEN 'destination' THEN 0 WHEN 'both' THEN 1 ELSE 2 END, created_at").all(uid(userId));
   return rows.map((d) => { const has = !!(d.creds && d.creds.length); delete d.creds; return { ...d, has_creds: has }; });
 }
 
