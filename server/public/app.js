@@ -223,7 +223,7 @@ function updateAccForm() {
     : "네이버: 블로그 주소 입력. 자동발행 불가 → HTML 복사식.";
 }
 function resetAccForm() {
-  $("accEditId").value = ""; $("accName").value = ""; $("accSite").value = "";
+  $("accEditId").value = ""; $("accName").value = ""; $("accSite").value = ""; $("accPersona").value = "";
   const uEl = $("accWpUser"), pEl = $("accWpPw");
   uEl.value = ""; pEl.value = ""; uEl.placeholder = ""; pEl.placeholder = ""; uEl.classList.remove("saved"); pEl.classList.remove("saved");
   $("accDefault").checked = false;
@@ -255,6 +255,7 @@ async function renderAccounts() {
 function loadAccForEdit(a) {
   $("accEditId").value = a.id; $("accName").value = a.name || ""; $("accPlatform").value = a.platform;
   $("accRole").value = a.role || "destination"; $("accSite").value = a.site_url || "";
+  $("accPersona").value = a.persona || "";
   $("accDefault").checked = !!a.is_default;
   const saved = !!a.has_creds;
   const uEl = $("accWpUser"), pEl = $("accWpPw");
@@ -283,7 +284,8 @@ async function onAccountSave() {
   const dst = {
     id: $("accEditId").value || undefined,
     name: $("accName").value.trim(), platform: $("accPlatform").value, role: $("accRole").value,
-    site_url: $("accSite").value.trim(), is_default: $("accDefault").checked
+    site_url: $("accSite").value.trim(), is_default: $("accDefault").checked,
+    persona: $("accPersona").value.trim()
   };
   if (!dst.name) { setStatus("계정 이름을 입력하세요.", true); return; }
   if (dst.platform === "wordpress") {
@@ -713,7 +715,7 @@ function accountStyle(acc) {
 }
 function promptForAccount(acc, keyword, variant, destUrl, reference) {
   const sourceText = $("originalText").value.trim();
-  const v = { ...(variant || {}), style: accountStyle(acc).vibe };   // 블로그별 톤 지시 주입
+  const v = { ...(variant || {}), style: accountStyle(acc).vibe, persona: acc.persona || "" };   // 블로그별 톤·페르소나 주입
   const common = { keyword, audience: settings.defaultAudience, tone: settings.defaultTone, authorBio: settings.authorBio, today: todayStr(), imageCount: parseInt($("imgCount").value, 10) || 1, variant: v, reference };
   // 목적지 모드 = 목적지 글, 쿠션 모드 = 쿠션 글 (계정 역할이 겸용이어도 현재 모드 기준)
   if (genMode === "destination") return buildBloggerMain({ ...common, sourceText, internalLinks: [] });

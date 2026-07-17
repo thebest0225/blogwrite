@@ -583,7 +583,7 @@ async function runSchedule(s) {
     const idxIn = {}; let made = 0, pub = 0;
     for (const acc of dests) {
       idxIn[acc.platform] = (idxIn[acc.platform] || 0) + 1;
-      const variant = { index: idxIn[acc.platform], total: groups[acc.platform].length };
+      const variant = { index: idxIn[acc.platform], total: groups[acc.platform].length, persona: acc.persona || "" };
       const built = buildBloggerMain({ sourceText: draftText, keyword, audience: st.defaultAudience, tone: st.defaultTone, authorBio: st.authorBio, today, imageCount: 1, reference: "", internalLinks: [], variant });
       let content = "";
       for (let attempt = 0; attempt < 2 && !content; attempt++) {
