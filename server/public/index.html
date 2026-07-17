@@ -48,6 +48,12 @@
               <button class="mini" id="markPublishedBtn"><iconify-icon icon="solar:check-read-linear"></iconify-icon> 발행 완료 표시</button>
             </div>
           </div>
+          <div class="mainurl-row" id="schedPubRow" style="background:var(--accent-soft);border-color:#dfe2fb;">
+            <span class="muted" style="flex-basis:100%;"><iconify-icon icon="solar:clock-circle-linear"></iconify-icon> 예약 발행 — 검토 후 원하는 시각에 자동 발행(WP·블로거). <b id="schedPubState"></b></span>
+            <input type="datetime-local" id="schedPubAt" style="flex:1;min-width:200px;" />
+            <button class="mini primary-mini" id="schedPubSet">예약</button>
+            <button class="mini hidden" id="schedPubClear">예약 해제</button>
+          </div>
           <div class="mainurl-row hidden" id="mainUrlRow">
             <span class="muted">발행된 목적지(WP) 주소를 저장하면 쿠션이 이 글로 유입됩니다 (WP 발행 버튼 쓰면 자동)</span>
             <input type="text" id="mainUrlInput" placeholder="https://wp.mangois.love/발행-글" />

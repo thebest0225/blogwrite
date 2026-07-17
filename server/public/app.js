@@ -97,6 +97,8 @@ async function init() {
   $("wpPublishBtn").addEventListener("click", () => wpPublish("publish"));
   $("mainUrlSave").addEventListener("click", onSaveMainUrl);
   $("markPublishedBtn").addEventListener("click", onMarkPublished);
+  $("schedPubSet").addEventListener("click", onSchedulePublishSet);
+  $("schedPubClear").addEventListener("click", onSchedulePublishClear);
   $("workBack").addEventListener("click", () => { cur = null; $("workDetail").style.display = "none"; });
   $("myPostAdd").addEventListener("click", onAddMyPost);
   $("myPostSearch").addEventListener("input", () => renderMyPosts());
@@ -666,6 +668,24 @@ async function onSaveMainUrl() {
   $("mainUrlInput").value = "";
   setStatus("✅ 목적지 주소 저장 완료. 이제 블로거·네이버 쿠션이 이 글로 유입됩니다.");
 }
+// 예약 발행: 검토 후 지정 시각에 자동 발행되게 예약
+async function onSchedulePublishSet() {
+  if (!cur) return;
+  const local = $("schedPubAt").value;
+  if (!local) { setStatus("발행할 날짜·시간을 선택하세요.", true); return; }
+  const iso = new Date(local).toISOString();
+  if (new Date(iso).getTime() < Date.now() - 60000) { setStatus("현재 이후 시각을 선택하세요.", true); return; }
+  await saveCur();  // 최신 내용(편집분) 저장 후 예약
+  await apiJson("/api/work/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: cur.id, publish_at: iso }) }).catch(() => {});
+  cur.publish_at = iso; renderCur();
+  setStatus(`⏰ ${fmtRunAt(iso)}에 자동 발행 예약됨. 그때 서버가 알아서 발행합니다.`);
+}
+async function onSchedulePublishClear() {
+  if (!cur) return;
+  await apiJson("/api/work/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: cur.id, publish_at: "" }) }).catch(() => {});
+  cur.publish_at = ""; renderCur();
+  setStatus("예약 발행을 해제했습니다.");
+}
 // 수동 발행 완료 표시 (네이버·블로거 등 HTML 붙여넣기식) → 작업목록에서 제거·보관
 async function onMarkPublished() {
   if (!cur) return;
@@ -1050,7 +1070,7 @@ async function renderWorkList() {
     row.innerHTML = `<span class="acc-badge ${dest ? "dest" : "cush"}">${dest ? "목적지" : "쿠션"}</span>`
       + `<span class="acc-plat">${PLAT_LABEL[w.target] || w.target}${acc.name ? " · " + acc.name : ""}</span>`
       + `<span class="nm">${w.title || "(제목없음)"}</span>`
-      + `<span class="df">${w.status === "generated" ? "생성됨" : w.status}</span>`;
+      + (w.publish_at ? `<span class="pubm" style="background:var(--accent-soft);color:var(--accent-dark);"><iconify-icon icon="solar:clock-circle-linear"></iconify-icon> ${fmtRunAt(w.publish_at)} 예약</span>` : `<span class="df">${w.status === "generated" ? "생성됨" : w.status}</span>`);
     const open = document.createElement("button"); open.className = "mini"; open.textContent = "열기"; open.addEventListener("click", () => openWork(w.id));
     const del = document.createElement("button"); del.className = "hist-del"; del.textContent = "✕";
     del.addEventListener("click", async () => { await apiJson("/api/work/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: w.id }) }).catch(() => {}); if (cur && cur.id === w.id) { cur = null; $("workDetail").style.display = "none"; } renderWorkList(); });
@@ -1109,7 +1129,7 @@ async function renderHistory() {
 async function openWork(id) {
   let w; try { w = await apiJson("/api/work/" + id); } catch { return; }
   const acc = accById()[w.destination_id] || { platform: w.target, role: "cushion", name: "" };
-  cur = { id: w.id, acc, target: w.target, article: w.article || { blocks: [] }, keyword: (w.article && w.article.keyword) || deriveTopic(), html: w.html || "", resolvedType: (w.article && w.article.type) || "", published_url: w.published_url };
+  cur = { id: w.id, acc, target: w.target, article: w.article || { blocks: [] }, keyword: (w.article && w.article.keyword) || deriveTopic(), html: w.html || "", resolvedType: (w.article && w.article.type) || "", published_url: w.published_url, publish_at: w.publish_at || "" };
   $("workDetail").style.display = "";
   renderCur();
   $("workDetail").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1121,6 +1141,15 @@ function renderCur() {
   $("wpActions").classList.toggle("hidden", cur.target !== "wordpress");
   $("bloggerPublishBtn").classList.toggle("hidden", cur.target !== "blogger");
   $("markPublishedBtn").classList.toggle("hidden", cur.target === "wordpress");
+  // 예약 발행: WP·블로거(자동발행 가능)만 노출
+  const canAuto = cur.target === "wordpress" || cur.target === "blogger";
+  $("schedPubRow").classList.toggle("hidden", !canAuto);
+  if (canAuto) {
+    $("schedPubAt").value = cur.publish_at ? toLocalInput(cur.publish_at) : "";
+    const set = !!cur.publish_at;
+    $("schedPubState").textContent = set ? `예약됨: ${fmtRunAt(cur.publish_at)}` : "";
+    $("schedPubClear").classList.toggle("hidden", !set);
+  }
   $("mainUrlRow").classList.toggle("hidden", !isDestRole(cur.acc));
   $("preview").classList.toggle("hidden", editMode);
   $("editor").classList.toggle("hidden", !editMode);

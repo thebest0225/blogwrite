@@ -497,6 +497,13 @@ app.get("/api/work", (req, res) => res.json({ items: DB.listWorkItems(req.userId
 app.get("/api/work/:id", (req, res) => { const w = DB.getWorkItem(req.userId, req.params.id); w ? res.json(w) : res.status(404).json({ error: "not found" }); });
 app.post("/api/work", (req, res) => res.json({ ok: true, id: DB.upsertWorkItem(req.userId, req.body || {}) }));
 app.post("/api/work/delete", (req, res) => { if (req.body?.id) DB.deleteWorkItem(req.userId, req.body.id); res.json({ ok: true }); });
+// 예약 발행 설정/해제 (생성된 글을 지정 시각에 자동 발행)
+app.post("/api/work/schedule", (req, res) => {
+  const { id, publish_at } = req.body || {};
+  if (!id) return res.status(400).json({ error: "id 필요" });
+  DB.setWorkPublishAt(req.userId, id, publish_at || null);
+  res.json({ ok: true });
+});
 
 // ---- 설정 (사용자별, 민감키 암호화) ----
 const SETTINGS_DEFAULTS = {
@@ -634,10 +641,30 @@ async function runSchedule(s) {
     DB.setScheduleStatus(s.id, "done", `목적지 ${made}개 생성${s.publish === "auto" ? ` · ${pub}개 자동발행` : " (작성완료, 수동발행 대기)"}`);
   } catch (e) { DB.setScheduleStatus(s.id, "error", String(e.message || e)); }
 }
+// 예약 발행: 생성 완료된 글을 지정 시각에 발행(WP/블로거). 네이버는 자동발행 불가 → 예약 해제.
+async function publishDueWorkItem(row) {
+  const userId = row.user_id;
+  const full = DB.getWorkItem(userId, row.id);
+  if (!full || full.status !== "generated") return;
+  const acc = DB.accountsForGeneration(userId).find((a) => a.id === row.destination_id) || { platform: row.target, id: row.destination_id };
+  if (acc.platform === "naver") { DB.setWorkPublishAt(userId, row.id, null); return; }
+  try {
+    const article = full.article || {};
+    const link = await publishServer(userId, acc, { title: full.title, content: full.html, category: article.category });
+    if (link) {
+      DB.upsertWorkItem(userId, { id: row.id, target: row.target, destination_id: row.destination_id, title: full.title || "", status: "published", published_url: link, publish_mode: "scheduled" });
+      DB.addAsset(userId, { url: link, title: full.title, keyword: article.keyword || "", excerpt: (full.html || "").replace(/<[^>]+>/g, " ").slice(0, 4000) });
+    }
+  } catch (e) { console.error("[work publish]", row.id, e.message); DB.setWorkPublishAt(userId, row.id, null); }  // 실패 시 예약 해제(무한 재시도 방지) — 작업보드에 남음
+}
 let _schedRunning = false;
 async function checkSchedules() {
   if (_schedRunning) return; _schedRunning = true;
-  try { const due = DB.dueSchedules(new Date().toISOString()); for (const s of due) await runSchedule(s); }
+  try {
+    const nowIso = new Date().toISOString();
+    const due = DB.dueSchedules(nowIso); for (const s of due) await runSchedule(s);
+    const dueWork = DB.dueWorkPublish(nowIso); for (const w of dueWork) await publishDueWorkItem(w);   // 예약 발행 큐
+  }
   catch (e) { console.error("[schedule] loop error", e); }
   finally { _schedRunning = false; }
 }

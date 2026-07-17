@@ -51,6 +51,7 @@ try { db.exec("ALTER TABLE destinations ADD COLUMN persona TEXT"); } catch {}
 try { db.exec("ALTER TABLE destinations ADD COLUMN topics TEXT"); } catch {}
 // 발행 방식(auto=자동발행 / manual=HTML 수동) 컬럼
 try { db.exec("ALTER TABLE work_items ADD COLUMN publish_mode TEXT"); } catch {}
+try { db.exec("ALTER TABLE work_items ADD COLUMN publish_at TEXT"); } catch {}
 // 예약 확장 컬럼 (초안/키워드 소스, 실행일시, 범위, 발행수준, 상태)
 for (const col of [
   "source TEXT DEFAULT 'keyword'", "draft_id TEXT", "run_at TEXT",
@@ -183,9 +184,12 @@ export function searchAssets(userId, query) {
 // ---- 작업 항목(칸반) ----
 export function listWorkItems(userId, status) {
   return status
-    ? db.prepare("SELECT id,draft_id,target,destination_id,title,status,published_url,publish_mode,updated_at FROM work_items WHERE user_id=? AND status=? ORDER BY updated_at DESC").all(uid(userId), status)
-    : db.prepare("SELECT id,draft_id,target,destination_id,title,status,published_url,publish_mode,updated_at FROM work_items WHERE user_id=? AND status!='published' ORDER BY updated_at DESC").all(uid(userId));
+    ? db.prepare("SELECT id,draft_id,target,destination_id,title,status,published_url,publish_mode,publish_at,updated_at FROM work_items WHERE user_id=? AND status=? ORDER BY updated_at DESC").all(uid(userId), status)
+    : db.prepare("SELECT id,draft_id,target,destination_id,title,status,published_url,publish_mode,publish_at,updated_at FROM work_items WHERE user_id=? AND status!='published' ORDER BY updated_at DESC").all(uid(userId));
 }
+// 예약 발행 설정 + 실행 큐(전 사용자, 시간 도래분)
+export function setWorkPublishAt(userId, id, iso) { db.prepare("UPDATE work_items SET publish_at=?, updated_at=? WHERE user_id=? AND id=?").run(iso || null, now(), uid(userId), id); }
+export function dueWorkPublish(nowIso) { return db.prepare("SELECT id,user_id,destination_id,target FROM work_items WHERE status='generated' AND publish_at IS NOT NULL AND publish_at<=? ORDER BY publish_at").all(nowIso); }
 export function getWorkItem(userId, id) {
   const w = db.prepare("SELECT * FROM work_items WHERE user_id=? AND id=?").get(uid(userId), id);
   if (w && w.article_json) { try { w.article = JSON.parse(w.article_json); } catch {} }
