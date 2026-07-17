@@ -18,3 +18,4 @@ server/drafts.json
 server/blogwrite.db
 server/blogwrite.db-*
 server/.migrated_v2
+server/oauth-store.json
