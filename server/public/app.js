@@ -35,7 +35,7 @@ async function apiJson(url, opts) {
   return j;
 }
 const chatComplete = ({ system, user, maxTokens, model, engine }) =>
-  apiJson("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system, user, maxTokens, model, engine: engine || settings?.genEngine }) }).then((j) => j.content);
+  apiJson("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, signal: genController?.signal, body: JSON.stringify({ system, user, maxTokens, model, engine: engine || settings?.genEngine }) }).then((j) => j.content);
 const generateImage = ({ prompt, aspectRatio, resolution }) =>
   apiJson("/api/image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, aspect: aspectRatio, resolution }) }).then((j) => j.url);
 const editImage = ({ imageUrl, prompt, aspectRatio, resolution }) =>
@@ -95,6 +95,7 @@ async function init() {
   $("schCancel").addEventListener("click", resetSchForm);
   $("optSave").addEventListener("click", onSaveOptions);
   $("pmClose").addEventListener("click", closeProgress);
+  $("pmCancel").addEventListener("click", cancelProgress);
   $("historyRefresh").addEventListener("click", renderHistory);
   $("historySearch").addEventListener("input", () => renderHistory());
 
@@ -129,10 +130,14 @@ async function updateInboxBadge() {
   try { const c = (await apiJson("/api/config")).newDrafts || 0; const b = $("inboxBadge"); b.textContent = c; b.classList.toggle("hidden", !c); } catch {}
 }
 let accounts = [];
-let genMode = "destination";   // destination | cushion
+let genMode = "draft";   // draft | destination | cushion
 const isDestForMode = (a) => { const r = a.role || "destination"; return r === "destination" || r === "both"; };
 const isCushForMode = (a) => { const r = a.role || "destination"; return r === "cushion" || r === "both"; };
-function accountsForMode() { return accounts.filter((a) => genMode === "destination" ? isDestForMode(a) : isCushForMode(a)); }
+function accountsForMode() {
+  if (genMode === "destination") return accounts.filter(isDestForMode);
+  if (genMode === "cushion") return accounts.filter(isCushForMode);
+  return [];
+}
 async function refreshAccounts() {
   try { accounts = await apiJson("/api/accounts").then((j) => j.accounts || []); } catch { accounts = []; }
   const el = $("genAccCount"); if (el) el.textContent = String(accountsForMode().length);
@@ -157,16 +162,24 @@ function selectedAccountsForMode() {
 function setGenMode(mode) {
   genMode = mode;
   document.querySelectorAll(".mode-tab").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
-  const cushion = mode === "cushion";
-  $("cushDestRow").classList.toggle("hidden", !cushion);
-  $("draftGenRow").classList.toggle("hidden", cushion);
-  $("modeAccLabel").textContent = cushion ? "쿠션" : "목적지";
-  $("genAll").innerHTML = `<iconify-icon icon="solar:magic-stick-3-bold"></iconify-icon> ${cushion ? "쿠션 생성" : "목적지 생성"}`;
-  $("modeHelp").innerHTML = cushion
-    ? "발행된 <b>목적지 글</b>을 고르면, 원본+목적지를 함께 참고해 새 정보·연관검색어를 더한 <b>쿠션</b>을 계정별로 생성합니다."
-    : "원본으로 <b>목적지 계정</b>에 완성글을 생성합니다. 생성 후 작업보드에서 발행하면 URL이 생겨요.";
+  const isDraft = mode === "draft", isCush = mode === "cushion";
+  $("draftGenRow").classList.toggle("hidden", !isDraft);
+  $("cushDestRow").classList.toggle("hidden", !isCush);
+  $("imgRow").classList.toggle("hidden", isDraft);
+  $("accPickWrap").classList.toggle("hidden", isDraft);
+  $("genAll").classList.toggle("hidden", isDraft);
+  $("genDraft").classList.toggle("hidden", !isDraft);
+  $("originalLabel").innerHTML = isDraft
+    ? `생성된 초안 <span class="muted">— AI 초안 결과가 여기 채워집니다(직접 붙여넣기·수정도 가능)</span>`
+    : `원본 글(초안) <span class="muted">— 붙여넣기 / 초안함에서 불러오기 / ① 초안 만들기 결과</span>`;
+  $("originalText").placeholder = isDraft ? "위에서 키워드로 AI 초안을 생성하거나, 직접 초안을 붙여넣으세요." : "상세한 원본 글(초안)을 붙여넣으세요.";
+  if (!isDraft) { $("modeAccLabel").textContent = isCush ? "쿠션" : "목적지"; $("genAll").innerHTML = `<iconify-icon icon="solar:magic-stick-3-bold"></iconify-icon> ${isCush ? "쿠션 생성" : "목적지 생성"}`; }
+  $("modeHelp").innerHTML =
+    isDraft ? "키워드를 넣고 <b>AI 초안 생성</b>을 누르면 Claude가 웹서치로 정보·연관검색어·링크가 풍부한 <b>초안</b>을 만듭니다. 완성되면 <b>② 목적지</b> 탭으로 넘어가세요. (직접 쓴 초안을 붙여넣어도 됩니다)"
+    : isCush ? "발행된 <b>목적지 글</b>을 고르면, 초안+목적지를 함께 참고해 새 정보·연관검색어를 더한 <b>쿠션</b>을 계정별로 생성합니다."
+    : "초안(원본)으로 <b>목적지 계정</b>에 발행용 완성글을 생성합니다. 생성 후 작업보드에서 발행하면 URL이 생겨요.";
   refreshAccounts();
-  if (cushion) loadCushDests();
+  if (isCush) loadCushDests();
 }
 let cushAssets = [];
 async function loadCushDests() {
@@ -362,23 +375,33 @@ async function loadDraft(id, title) {
   $("originalText").value = d.content || "";
   activeDraftId = d.id;
   showView("new");
-  setStatus(`📥 초안 "${d.title || title}" 불러옴. '계정별 전체 생성'을 누르세요.`);
+  setGenMode("destination");
+  setStatus(`📥 초안 "${d.title || title}" 불러옴. 계정을 고르고 '목적지 생성'을 누르세요.`);
 }
 
 function setStatus(msg, isError = false) { const el = $("status"); el.textContent = msg; el.classList.remove("hidden"); el.classList.toggle("error", isError); if (progressOpen && !isError) progressStep(msg); }
 
 /* ===== 진행상황 모달 ===== */
-let progressOpen = false;
+let progressOpen = false, genController = null, genAborted = false;
 function openProgress(title) {
-  progressOpen = true;
+  progressOpen = true; genAborted = false;
+  try { genController = new AbortController(); } catch { genController = null; }
   $("pmTitle").textContent = title;
   $("pmStep").textContent = "준비 중…";
   $("pmLog").innerHTML = "";
   $("pmFill").style.width = "2%";
   $("pmPct").textContent = "";
   $("pmSpinner").classList.remove("hidden");
+  $("pmCancel").classList.remove("hidden");
   $("pmClose").classList.add("hidden");
   $("progressModal").classList.remove("hidden");
+}
+function cancelProgress() {
+  if (!progressOpen) return;
+  genAborted = true;
+  try { genController?.abort(); } catch {}
+  $("pmStep").textContent = "중단하는 중… (진행 중인 요청을 정리합니다)";
+  $("pmCancel").classList.add("hidden");
 }
 function progressStep(text, pct) {
   if (!progressOpen) return;
@@ -396,6 +419,7 @@ function progressLog(text, state = "done") {
 function progressDone(ok, msg) {
   if (!progressOpen) return;
   $("pmSpinner").classList.add("hidden");
+  $("pmCancel").classList.add("hidden");
   $("pmClose").classList.remove("hidden");
   $("pmStep").textContent = msg;
   $("pmStep").classList.toggle("err", !ok);
@@ -500,13 +524,11 @@ async function renderTrends(force) {
       + (it.newsTitle ? `<span class="trend-news">${escapeHtml(it.newsTitle)}</span>` : "")
       + `</span>`;
     card.addEventListener("click", () => {
-      const cur = $("originalText").value.trim();
-      if (cur && !confirm("원본 입력 내용을 이 트렌드 주제로 교체할까요?")) return;
-      $("originalText").value = seedFromTrend(it);
-      setGenMode("destination");
-      $("originalText").focus();
-      $("originalText").scrollIntoView({ behavior: "smooth", block: "center" });
-      setStatus(`✨ "${it.title}" 주제로 원본 입력을 채웠어요. 내용을 다듬거나 바로 '목적지 생성'을 누르세요.`);
+      setGenMode("draft");
+      $("draftKeyword").value = it.title;
+      $("draftKeyword").focus();
+      $("draftGenRow").scrollIntoView({ behavior: "smooth", block: "center" });
+      setStatus(`✨ "${it.title}" 주제를 초안 키워드에 넣었어요. 'AI 초안 생성'을 누르세요.`);
     });
     if (it.newsUrl) {
       const a = document.createElement("a"); a.className = "trend-newslink"; a.href = it.newsUrl; a.target = "_blank"; a.rel = "noopener";
@@ -753,11 +775,11 @@ async function generateDraft() {
     $("originalText").value = text.trim();
     // 초안도 초안함에 보관
     try { await apiJson("/api/drafts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: (text.split(/\n/)[0] || kw).slice(0, 80), content: text.trim(), keyword: kw, source: "ai-draft" }) }); updateInboxBadge(); } catch {}
-    progressDone(true, "초안 생성 완료 — 내용을 확인하고 '목적지 생성'을 누르세요.");
-    setStatus(`✅ "${kw}" 초안 생성 완료. 검토 후 목적지 생성을 진행하세요.`);
+    progressDone(true, "초안 생성 완료 — 검토 후 ② 목적지 탭으로 이동하세요.");
+    setStatus(`✅ "${kw}" 초안 생성 완료(초안함에도 저장). 검토 후 ② 목적지 만들기 탭으로 이동하세요.`);
   } catch (e) {
-    progressDone(false, "초안 생성 실패: " + e.message);
-    setStatus("초안 생성 실패: " + e.message, true);
+    if (genAborted || e.name === "AbortError") { progressDone(false, "중단되었습니다."); setStatus("초안 생성을 중단했습니다."); }
+    else { progressDone(false, "초안 생성 실패: " + e.message); setStatus("초안 생성 실패: " + e.message, true); }
   } finally { $("genDraft").disabled = false; $("genAll").disabled = false; }
 }
 async function chatArticle(built) {
@@ -811,13 +833,14 @@ async function generateAll() {
     const groups = {}; accts.forEach((a) => { (groups[gk(a)] = groups[gk(a)] || []).push(a); });
     const idxIn = {}; let done = 0;
     for (const acc of accts) {
+      if (genAborted) break;
       const k = gk(acc); idxIn[k] = (idxIn[k] || 0) + 1;
       const variant = { index: idxIn[k], total: groups[k].length };
       const base = 8 + Math.round((done / total) * 88);
       progressStep(`[${acc.name}] ${eng === "claude" ? "웹서치·작성" : "재가공"} 중… (${done + 1}/${total})`, base);
       let article;
       try { article = await chatArticle(promptForAccount(acc, keyword, variant, destUrl, reference)); }
-      catch (e) { progressLog(`✗ ${acc.name} 실패: ${e.message}`, "error"); done++; continue; }
+      catch (e) { if (genAborted || e.name === "AbortError") break; progressLog(`✗ ${acc.name} 실패: ${e.message}`, "error"); done++; continue; }
       const html = await finalizeForAccount(acc, article, keyword, destUrl);
       const wid = await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ draft_id: activeDraftId, target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated", role: genMode }) }).then((j) => j.id).catch(() => null);
       await storeAdd({ type: "article", title: article.title || "", keyword, platform: acc.platform });
@@ -837,14 +860,17 @@ async function generateAll() {
       progressBar(8 + Math.round((done / total) * 88));
     }
     if (activeDraftId) { await draftStatus(activeDraftId, "used"); renderDrafts(); }
-    if (okCount) {
+    if (genAborted) {
+      progressDone(false, `중단됨 — ${okCount}/${total}개까지 생성 완료(작업보드에 저장됨)`);
+      setStatus(`생성을 중단했습니다. ${okCount}개는 저장되었습니다.`);
+    } else if (okCount) {
       const autoMsg = settings.autoPublish ? " (WP·블로거 자동발행 시도됨)" : "";
       progressDone(true, `${okCount}/${total}개 ${modeLabel} 글 생성 완료${autoMsg}`);
       setStatus(`✅ ${okCount}개 ${modeLabel} 글 생성 완료${autoMsg}. 작업보드/발행 기록에서 확인하세요.`);
     } else {
       progressDone(false, "모든 계정 생성 실패. 키/네트워크를 확인하세요.");
     }
-  } catch (e) { progressDone(false, "오류: " + e.message); setStatus("오류: " + e.message, true); }
+  } catch (e) { if (genAborted || e.name === "AbortError") { progressDone(false, "중단되었습니다."); setStatus("생성을 중단했습니다."); } else { progressDone(false, "오류: " + e.message); setStatus("오류: " + e.message, true); } }
   finally {
     $("genAll").disabled = false;
     if (okCount) { showView("board"); await renderWorkList(); if (workItems[0]) openWork(workItems[0].id); }

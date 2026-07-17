@@ -79,20 +79,21 @@
         </div>
 
         <div class="mode-tabs">
-          <button class="mode-tab active" data-mode="destination"><iconify-icon icon="solar:target-bold-duotone"></iconify-icon> ① 목적지 만들기</button>
-          <button class="mode-tab" data-mode="cushion"><iconify-icon icon="solar:share-circle-bold-duotone"></iconify-icon> ② 쿠션 만들기</button>
+          <button class="mode-tab active" data-mode="draft"><iconify-icon icon="solar:document-add-bold-duotone"></iconify-icon> ① 초안 만들기</button>
+          <button class="mode-tab" data-mode="destination"><iconify-icon icon="solar:target-bold-duotone"></iconify-icon> ② 목적지 만들기</button>
+          <button class="mode-tab" data-mode="cushion"><iconify-icon icon="solar:share-circle-bold-duotone"></iconify-icon> ③ 쿠션 만들기</button>
         </div>
         <div class="card">
-          <p class="muted" id="modeHelp">원본으로 <b>목적지 계정</b>에 완성글을 생성합니다. 생성 후 작업보드에서 발행하면 URL이 생겨요.</p>
-          <!-- 초안 AI 생성 (목적지 모드 전용): Claude 공식 API + 웹서치 -->
+          <p class="muted" id="modeHelp"></p>
+          <!-- ① 초안 만들기: Claude 공식 API + 웹서치 -->
           <div id="draftGenRow" class="draft-gen">
-            <div class="draft-gen-head"><iconify-icon icon="solar:magic-stick-3-bold-duotone"></iconify-icon> <b>초안이 없다면 AI로 생성</b> <span class="muted">— Claude 공식 API가 웹검색해서 정보·링크 풍부한 초안을 만들어요</span></div>
+            <div class="draft-gen-head"><iconify-icon icon="solar:magic-stick-3-bold-duotone"></iconify-icon> <b>키워드로 AI 초안 생성</b> <span class="muted">— Claude 공식 API가 웹검색해서 정보·연관검색어·실제 링크가 풍부한 초안을 만듭니다</span></div>
             <div class="row" style="gap:8px;flex-wrap:wrap;">
-              <input type="text" id="draftKeyword" placeholder="주제/키워드 (예: 제주 3박4일 코스) — 비우면 원본 첫 줄 사용" style="flex:1;min-width:200px;" />
-              <button class="mini primary-mini" id="genDraft"><iconify-icon icon="solar:magic-stick-3-linear"></iconify-icon> AI 초안 생성</button>
+              <input type="text" id="draftKeyword" placeholder="주제/키워드 (예: 제주 3박4일 코스) — 트렌드를 눌러도 채워져요" style="flex:1;min-width:200px;" />
+              <button class="primary" id="genDraft" style="width:auto;"><iconify-icon icon="solar:magic-stick-3-bold"></iconify-icon> AI 초안 생성</button>
             </div>
           </div>
-          <label class="field"><span>원본 글 <span class="muted">— claude.ai 등에서 작성. 초안함에서 불러올 수도 있어요.</span></span>
+          <label class="field"><span id="originalLabel">원본 글 <span class="muted">— claude.ai 등에서 작성. 초안함에서 불러올 수도 있어요.</span></span>
             <textarea id="originalText" rows="9" placeholder="상세한 원본 글을 붙여넣으세요."></textarea>
           </label>
           <!-- 쿠션 모드 전용: 유입시킬 목적지 선택 -->
@@ -101,16 +102,16 @@
             <select id="cushDest"></select>
             <input type="text" id="bloggerUrl" placeholder="또는 목적지 URL 직접 입력 (https://...)" style="margin-top:6px;" />
           </div>
-          <div class="imgrow">
+          <div class="imgrow" id="imgRow">
             <label class="check"><input type="checkbox" id="genImages" /><span>이미지 생성</span></label>
             <label class="imgcount"><span>개수</span><select id="imgCount"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
             <label class="imgcount"><span>썸네일 비율</span><select id="imgAspect"><option value="4:3">4:3</option><option value="16:9">16:9</option><option value="1:1">1:1</option></select></label>
           </div>
-          <div class="gen-accpick-wrap">
+          <div class="gen-accpick-wrap" id="accPickWrap">
             <div class="gen-accpick-head"><b id="genAccCount">0</b>개 <span id="modeAccLabel">목적지</span> 계정 · <span class="muted">체크한 계정에만 각각 다른 글을 생성합니다</span> <a href="#" id="goAccounts">계정 관리 →</a></div>
             <div id="genAccPick" class="gen-accpick"></div>
           </div>
-          <button class="primary" id="genAll"><iconify-icon icon="solar:magic-stick-3-bold"></iconify-icon> 목적지 생성</button>
+          <button class="primary hidden" id="genAll"><iconify-icon icon="solar:magic-stick-3-bold"></iconify-icon> 목적지 생성</button>
         </div>
       </section>
 
@@ -254,6 +255,7 @@
       <div class="pm-head">
         <iconify-icon id="pmSpinner" class="pm-spin" icon="solar:restart-linear"></iconify-icon>
         <h3 id="pmTitle">생성 중</h3>
+        <button id="pmCancel" class="mini"><iconify-icon icon="solar:stop-circle-bold"></iconify-icon> 중단</button>
         <button id="pmClose" class="mini hidden"><iconify-icon icon="solar:check-circle-bold"></iconify-icon> 닫기</button>
       </div>
       <div id="pmStep" class="pm-step">준비 중…</div>
