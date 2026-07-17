@@ -256,6 +256,30 @@ input.saved::placeholder { color: #10b981; font-weight: 600; opacity: 1; }
 .ed-form input { flex: 1; min-width: 120px; }
 .ed-hint { font-size: 11px; color: var(--muted); padding: 4px 2px; }
 
+/* ===== 인라인(위지윅) 편집기 — 미리보기 위에서 바로 편집 ===== */
+.editor { border: 1px solid var(--line); border-radius: var(--radius); padding: 0; background: #fff; }
+.ied-doc { max-width: 720px; margin: 0 auto; padding: 24px 22px 40px; color: #222; font-family: -apple-system, "Malgun Gothic", sans-serif; }
+.ied-h1 { font-size: 1.8em; line-height: 1.3; font-weight: 800; margin: 0 0 .5em; outline: none; }
+.ied-block { position: relative; border-radius: 8px; }
+.ied-block:hover { box-shadow: 0 0 0 1px var(--line-2); }
+.ied-ctrl { position: absolute; top: 2px; right: 2px; display: none; gap: 2px; z-index: 5; background: rgba(255,255,255,.9); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+.ied-block:hover > .ied-ctrl { display: flex; }
+.ied-btn { border: none; background: transparent; color: var(--muted); cursor: pointer; padding: 4px; border-radius: 6px; display: inline-flex; }
+.ied-btn iconify-icon { font-size: 16px; }
+.ied-btn:hover { background: var(--accent-soft); color: var(--accent); }
+.ied-edit { outline: none; border-radius: 6px; padding: 4px 6px; margin: 0 -6px; transition: box-shadow .12s; white-space: pre-wrap; }
+.ied-edit:hover { box-shadow: inset 0 0 0 1px var(--line-2); }
+.ied-edit:focus { box-shadow: inset 0 0 0 2px var(--accent-ring); background: #fcfcff; }
+.ied-p { font-size: 1em; line-height: 1.8; margin: 0 0 1em; color: #333; }
+.ied-h2 { font-size: 1.4em; font-weight: 800; margin: 1.2em 0 .5em; }
+.ied-h3 { font-size: 1.15em; font-weight: 700; margin: 1em 0 .4em; }
+.ied-callout { background: #f6f8ff; border-left: 3px solid var(--accent); padding: 10px 12px; margin: 0 0 1em; line-height: 1.7; }
+.ied-listedit { line-height: 2; padding-left: 6px; }
+.ied-view { pointer-events: none; }
+.ied-view a { pointer-events: none; }
+.ied-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 12px; padding: 10px; background: var(--accent-soft); border-radius: 10px; pointer-events: auto; }
+.ied-form input, .ied-form textarea { flex: 1; min-width: 140px; }
+
 /* ===== 미리보기 / 결과 ===== */
 .result-actions { display: flex; gap: 8px; align-items: center; }
 .meta-line { font-size: 12px; color: var(--muted); line-height: 1.65; white-space: pre-line; }

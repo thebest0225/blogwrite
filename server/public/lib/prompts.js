@@ -242,8 +242,11 @@ ${JSON_CONTRACT}`;
 
 // [개편] 블로거 메인 글: 클로드에서 쓴 원본을 보강+디자인해 완성형으로
 function variantBlock(v) {
-  if (!v || !v.total || v.total <= 1) return "";
-  return `\n[변형 지시 — 매우 중요] 같은 원본으로 여러 계정용 글을 만드는 중이다. 이 글은 그 중 ${v.index}번째다(총 ${v.total}개). 다른 변형들과 **제목·소제목·도입부·파생 키워드·다루는 각도를 확실히 다르게** 써서 중복을 피해라(같은 문장 재사용 금지).\n`;
+  if (!v) return "";
+  let out = "";
+  if (v.total > 1) out += `\n[변형 지시 — 매우 중요] 같은 원본으로 여러 계정용 글을 만드는 중이다. 이 글은 그 중 ${v.index}번째다(총 ${v.total}개). 다른 변형들과 **제목·소제목·도입부·파생 키워드·다루는 각도를 확실히 다르게** 써서 중복을 피해라(같은 문장 재사용 금지).\n`;
+  if (v.style) out += `\n[이 블로그의 톤·디자인 아이덴티티 — 이 스타일로 통일감 있게] "${v.style}" 이 느낌이 살도록 소제목 어조, 리스트/표/요약박스(callout) 사용 방식, 문단 길이를 맞춰라. (블로그마다 색깔이 달라야 한다)\n`;
+  return out;
 }
 export function buildBloggerMain({ sourceText, keyword, audience, tone, authorBio, today, imageCount, reference, internalLinks, variant }) {
   const resolved = resolveType("auto", keyword || "");

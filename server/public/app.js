@@ -582,13 +582,15 @@ async function getAllMyPosts() {
   } catch { return []; }
 }
 function matchMyPosts(posts, keyword) {
-  const kw = (keyword || "").toLowerCase().trim(); if (!kw) return posts.slice(0, 8);
+  const kw = (keyword || "").toLowerCase().trim(); if (!kw) return [];
   const tokens = kw.split(/\s+/).filter((t) => t.length >= 2);
+  // 다중 토큰이면 2개 이상 겹쳐야 관련(무관한 단일 단어 매칭 배제)
+  const need = tokens.length >= 2 ? 2 : 1;
   return posts.map((p) => {
     const hay = ((p.title || "") + " " + (p.keyword || "")).toLowerCase();
-    let s = 0; for (const t of tokens) if (hay.includes(t)) s++; if (hay.includes(kw)) s += 2;
+    let s = 0; for (const t of tokens) if (hay.includes(t)) s++; if (hay.includes(kw)) s += 3;
     return { p, s };
-  }).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => ({ title: x.p.title, link: x.p.url }));
+  }).filter((x) => x.s >= need).sort((a, b) => b.s - a.s).map((x) => ({ title: x.p.title, link: x.p.url }));
 }
 async function renderMyPosts() {
   const box = $("myPostsList"); const all = await getAllMyPosts();
@@ -643,12 +645,11 @@ async function onMarkPublished() {
 // ---------- 링크 소스 ----------
 async function gatherRelatedLinks(keyword) {
   const all = await getAllMyPosts();
+  // 관련성 있는 글만 사용(무관한 최근글 끌어오기 금지). 관련 없으면 내부링크 안 넣음.
   const myPosts = matchMyPosts(all, keyword);
   const seenM = new Set(), mp = [];
   for (const it of myPosts) if (it?.link && !seenM.has(it.link)) { seenM.add(it.link); mp.push(it); }
-  // 키워드 매칭이 적으면 최근 발행글로 보충 — 내부 크로스링크는 항상 넣는 게 SEO에 유리
-  if (mp.length < 3) { for (const p of all) { if (mp.length >= 6) break; if (p.url && !seenM.has(p.url)) { seenM.add(p.url); mp.push({ title: p.title, link: p.url }); } } }
-  lastMyPosts = mp.slice(0, 8);
+  lastMyPosts = mp.slice(0, 6);
   const embedded = extractLinksFromText($("originalText").value || "");
   const seenS = new Set(), src = [];
   for (const it of embedded) if (it?.link && !seenS.has(it.link)) { seenS.add(it.link); src.push(it); }
@@ -688,9 +689,24 @@ function destUrlForGen() {
   const d = accounts.find((a) => isDestRole(a));
   return getDestUrl() || (d && d.site_url) || "";
 }
+// 계정(블로그)별 고유 디자인 아이덴티티 — 색·톤이 블로그마다 다르게
+const ACC_PALETTE = [
+  { accent: "#e11d48", vibe: "선명하고 강렬한 매거진 톤(굵은 소제목, 임팩트 있는 도입부)" },
+  { accent: "#2563eb", vibe: "신뢰감 있는 정보지 톤(정돈된 표·요약박스 적극 사용)" },
+  { accent: "#059669", vibe: "산뜻하고 실용적인 가이드 톤(체크리스트·단계 강조)" },
+  { accent: "#d97706", vibe: "따뜻하고 친근한 블로그 톤(대화하듯, 짧은 문단)" },
+  { accent: "#0891b2", vibe: "차분하고 전문적인 톤(FAQ·핵심요약 강조)" },
+  { accent: "#4f46e5", vibe: "깔끔하고 트렌디한 톤(간결한 소제목, 리스트 중심)" }
+];
+function accountStyle(acc) {
+  const s = String((acc && (acc.id || acc.name)) || "");
+  let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return ACC_PALETTE[h % ACC_PALETTE.length];
+}
 function promptForAccount(acc, keyword, variant, destUrl, reference) {
   const sourceText = $("originalText").value.trim();
-  const common = { keyword, audience: settings.defaultAudience, tone: settings.defaultTone, authorBio: settings.authorBio, today: todayStr(), imageCount: parseInt($("imgCount").value, 10) || 1, variant, reference };
+  const v = { ...(variant || {}), style: accountStyle(acc).vibe };   // 블로그별 톤 지시 주입
+  const common = { keyword, audience: settings.defaultAudience, tone: settings.defaultTone, authorBio: settings.authorBio, today: todayStr(), imageCount: parseInt($("imgCount").value, 10) || 1, variant: v, reference };
   // 목적지 모드 = 목적지 글, 쿠션 모드 = 쿠션 글 (계정 역할이 겸용이어도 현재 모드 기준)
   if (genMode === "destination") return buildBloggerMain({ ...common, sourceText, internalLinks: [] });
   return buildCushionPrompt(acc.platform === "naver" ? "naver" : "blogger", { ...common, sourceText, bloggerUrl: destUrl });
@@ -715,7 +731,7 @@ async function genBlockImageAcc(acc, b, article, keyword) {
   const aspect = isThumb ? aspectFor(acc) : "4:3";
   b._genPrompt = genPrompt; b._headline = headline; b._isThumb = isThumb; b._aspect = aspect;
   let url = await generateImage({ prompt: genPrompt, aspectRatio: aspect, resolution: safeResolution(aspect) });
-  if (isThumb && settings.thumbnailMode === "overlay") { try { url = await composeThumbnail({ imageUrl: url, text: headline, accent: settings.overlayAccent || "#ff2d55", aspect }); } catch (e) { console.warn(e); } }
+  if (isThumb && settings.thumbnailMode === "overlay") { try { url = await composeThumbnail({ imageUrl: url, text: headline, accent: accountStyle(acc).accent, aspect }); } catch (e) { console.warn(e); } }
   b.resolvedUrl = url;
 }
 const ENTICERS = ["지금 바로 확인 →", "놓치면 후회해요 →", "여기서 정리 끝 →", "이것도 꼭 보세요 →", "한눈에 보기 →"];
@@ -777,16 +793,17 @@ function embedYouTube(article) {
 }
 function buildHtmlForAccount(acc, article, keyword, destUrl) {
   const isNaver = acc.platform === "naver"; const myPosts = isNaver ? [] : lastMyPosts;
+  const accent = accountStyle(acc).accent;   // 블로그별 고유 포인트 색
   try {
     return buildHtml(article, {
-      adEnabled: settings.adEnabled, adCode: settings.adCode, accent: settings.overlayAccent || "#e11d48",
+      adEnabled: settings.adEnabled, adCode: settings.adCode, accent,
       linkMode: settings.linkMode || "preserve", searchContext: keyword || article?.title || "",
       relatedUrls: myPosts.map((x) => x.link), relatedPosts: myPosts, sources: isNaver ? [] : lastSources,
       selfUrl: isDestRole(acc) ? "" : destUrl
     }).html;
   } catch (e) {
     console.error("preview build error:", e);
-    try { return buildHtml(article, { accent: settings.overlayAccent || "#e11d48", linkMode: settings.linkMode || "preserve" }).html; }
+    try { return buildHtml(article, { accent, linkMode: settings.linkMode || "preserve" }).html; }
     catch { return `<h1>${(article?.title || "").replace(/</g, "&lt;")}</h1><p>미리보기 조립 오류. HTML 복사는 가능합니다.</p>`; }
   }
 }
@@ -1021,6 +1038,8 @@ function renderCur() {
   $("bloggerPublishBtn").classList.toggle("hidden", !(cur.target === "blogger" && cur.acc.has_creds));
   $("markPublishedBtn").classList.toggle("hidden", cur.target === "wordpress");
   $("mainUrlRow").classList.toggle("hidden", !isDestRole(cur.acc));
+  $("preview").classList.toggle("hidden", editMode);
+  $("editor").classList.toggle("hidden", !editMode);
   renderImageEditors();
   if (editMode) renderEditor();
 }
@@ -1036,9 +1055,15 @@ function toggleEdit() {
   $("editToggle").classList.toggle("primary-mini", editMode);
   $("editToggle").innerHTML = editMode ? `<iconify-icon icon="solar:check-circle-bold"></iconify-icon> 편집 완료` : `<iconify-icon icon="solar:pen-2-linear"></iconify-icon> 편집`;
   $("editor").classList.toggle("hidden", !editMode);
+  $("preview").classList.toggle("hidden", editMode);   // 편집 시 iframe 숨기고 인라인 편집기로
   if (editMode) renderEditor();
+  else { rebuildCur(); $("preview").srcdoc = buildPreviewDoc(cur.article.title || "", cur.html); saveCur(); }
 }
 function refreshAfterEdit() { rebuildCur(); $("preview").srcdoc = buildPreviewDoc(cur.article.title || "", cur.html); renderEditor(); saveCur(); }
+// 텍스트 인라인 편집(타이핑 중 재렌더 없이 저장만 — 포커스 유지)
+let _liveT = null;
+function refreshAfterEditLive() { rebuildCur(); clearTimeout(_liveT); _liveT = setTimeout(saveCur, 600); }
+function mkIconBtn(icon, title, fn) { const b = document.createElement("button"); b.className = "ied-btn"; b.title = title; b.innerHTML = `<iconify-icon icon="${icon}"></iconify-icon>`; b.addEventListener("click", (e) => { e.preventDefault(); fn(); }); return b; }
 const ED_TYPE = { paragraph: "문단", heading: "제목", list: "리스트", table: "표", callout: "박스", cta: "버튼", linkcard: "링크카드", image: "이미지", youtube: "영상" };
 function edSummary(b) {
   if (b.type === "youtube") return `[영상] ${b.title || ""} (${ytId(b.url) || "?"})`;
@@ -1053,11 +1078,16 @@ function edSummary(b) {
 function renderEditor() {
   const box = $("editor"); box.innerHTML = "";
   if (!cur) { box.innerHTML = '<div class="ed-hint">작업을 선택하세요.</div>'; return; }
-  const d = document.createElement("div"); d.className = "ed-hint"; d.textContent = "블록 사이에 마우스를 올리면 글·버튼·이미지·영상을 추가할 수 있어요. 제목/문단은 바로 수정, ✕로 삭제.";
+  const d = document.createElement("div"); d.className = "ed-hint"; d.innerHTML = '미리보기 위에서 바로 편집하세요 — 제목·문단·소제목은 <b>클릭해서 그대로 수정</b>, 블록 사이에 마우스를 올리면 글·버튼·이미지·영상 추가, 우측 아이콘으로 순서변경·삭제·수정.';
   box.appendChild(d);
+  const article = document.createElement("div"); article.className = "ied-doc"; box.appendChild(article);
+  // 제목
+  const h1 = document.createElement("h1"); h1.className = "ied-h1"; h1.contentEditable = "true"; h1.spellcheck = false; h1.textContent = cur.article.title || "";
+  h1.addEventListener("blur", () => { cur.article.title = h1.innerText.trim(); refreshAfterEditLive(); });
+  article.appendChild(h1);
   const blocks = cur.article.blocks || [];
-  box.appendChild(insertBar(0));
-  blocks.forEach((b, i) => { box.appendChild(blockRow(b, i)); box.appendChild(insertBar(i + 1)); });
+  article.appendChild(insertBar(0));
+  blocks.forEach((b, i) => { article.appendChild(blockRow(b, i)); article.appendChild(insertBar(i + 1)); });
 }
 function insertBar(index) {
   const bar = document.createElement("div"); bar.className = "ed-insert";
@@ -1066,17 +1096,64 @@ function insertBar(index) {
   return bar;
 }
 function blockRow(b, i) {
-  const row = document.createElement("div"); row.className = "ed-block";
-  const del = document.createElement("button"); del.className = "ed-del"; del.textContent = "✕";
-  del.addEventListener("click", () => { cur.article.blocks.splice(i, 1); refreshAfterEdit(); });
-  row.appendChild(del);
-  const type = document.createElement("div"); type.className = "ed-type"; type.textContent = ED_TYPE[b.type] || b.type; row.appendChild(type);
-  if (b.type === "paragraph" || b.type === "heading") {
-    const ta = document.createElement("textarea"); ta.rows = b.type === "heading" ? 1 : 3; ta.value = b.text || "";
-    ta.addEventListener("input", () => { b.text = ta.value; });
-    ta.addEventListener("blur", refreshAfterEdit); row.appendChild(ta);
-  } else { const body = document.createElement("div"); body.className = "ed-body"; body.textContent = edSummary(b); row.appendChild(body); }
+  const row = document.createElement("div"); row.className = "ied-block";
+  // 우측 상단 컨트롤(hover 시 노출)
+  const ctrl = document.createElement("div"); ctrl.className = "ied-ctrl";
+  ctrl.appendChild(mkIconBtn("solar:arrow-up-linear", "위로", () => { const a = cur.article.blocks; if (i > 0) { [a[i - 1], a[i]] = [a[i], a[i - 1]]; refreshAfterEdit(); } }));
+  ctrl.appendChild(mkIconBtn("solar:arrow-down-linear", "아래로", () => { const a = cur.article.blocks; if (i < a.length - 1) { [a[i + 1], a[i]] = [a[i], a[i + 1]]; refreshAfterEdit(); } }));
+  const structural = !["paragraph", "heading", "list", "callout"].includes(b.type);
+  if (structural) ctrl.appendChild(mkIconBtn("solar:pen-linear", "수정", () => openBlockEdit(b, i, row)));
+  ctrl.appendChild(mkIconBtn("solar:trash-bin-trash-linear", "삭제", () => { if (confirm("이 블록을 삭제할까요?")) { cur.article.blocks.splice(i, 1); refreshAfterEdit(); } }));
+  row.appendChild(ctrl);
+
+  if (b.type === "paragraph" || b.type === "heading" || b.type === "callout") {
+    const el = document.createElement("div");
+    el.className = "ied-edit" + (b.type === "heading" ? " ied-h" + (b.level || 2) : b.type === "callout" ? " ied-callout" : " ied-p");
+    el.contentEditable = "true"; el.spellcheck = false; el.textContent = b.text || "";
+    el.addEventListener("blur", () => { b.text = el.innerText; refreshAfterEditLive(); });
+    row.appendChild(el);
+  } else if (b.type === "list") {
+    const el = document.createElement("div"); el.className = "ied-edit ied-listedit"; el.contentEditable = "true"; el.spellcheck = false;
+    el.innerText = (b.items || []).join("\n");
+    el.addEventListener("blur", () => { b.items = el.innerText.split(/\n/).map((s) => s.trim()).filter(Boolean); refreshAfterEditLive(); });
+    row.appendChild(el);
+  } else {
+    // 구조 블록(버튼/링크카드/이미지/영상/표): 실제 렌더된 모습 그대로 표시
+    const view = document.createElement("div"); view.className = "ied-view";
+    try { view.innerHTML = buildHtml({ blocks: [b] }, { accent: accountStyle(cur.acc).accent, linkMode: "preserve", relatedUrls: (lastMyPosts || []).map((x) => x.link), selfUrl: isDestRole(cur.acc) ? "" : destUrlForGen() }).html; }
+    catch { view.textContent = edSummary(b); }
+    row.appendChild(view);
+  }
   return row;
+}
+// 구조 블록 인라인 수정 폼
+function openBlockEdit(b, i, row) {
+  const old = row.querySelector(".ied-form"); if (old) { old.remove(); return; }
+  const form = document.createElement("div"); form.className = "ied-form";
+  const addInput = (ph, val) => { const el = document.createElement("input"); el.placeholder = ph; el.value = val || ""; form.appendChild(el); return el; };
+  let apply;
+  if (b.type === "cta") {
+    const label = addInput("버튼 문구", b.label); const url = addInput("링크 URL(비우면 목적지)", b.url === "#" ? "" : b.url);
+    apply = () => { b.label = label.value.trim() || "자세히 보기 →"; b.url = url.value.trim() || destUrlForGen() || "#"; };
+  } else if (b.type === "youtube") {
+    const url = addInput("유튜브 주소", b.url);
+    apply = () => { if (!ytId(url.value.trim())) { setStatus("유효한 유튜브 주소가 아닙니다.", true); return false; } b.url = url.value.trim(); };
+  } else if (b.type === "linkcard") {
+    const head = addInput("카드 제목", b.heading);
+    apply = () => { b.heading = head.value.trim(); };
+  } else if (b.type === "image") {
+    const alt = addInput("이미지 설명(alt)", b.alt);
+    apply = () => { b.alt = alt.value.trim(); };
+    form.appendChild(Object.assign(document.createElement("span"), { className: "muted", textContent: "이미지 재생성은 아래 '이미지 수정'에서" }));
+  } else if (b.type === "table") {
+    const ta = document.createElement("textarea"); ta.rows = 4; ta.placeholder = "행마다 줄바꿈, 칸은 | 로 구분"; ta.value = [(b.headers || []).join(" | "), ...(b.rows || []).map((r) => r.join(" | "))].join("\n"); form.appendChild(ta);
+    apply = () => { const ls = ta.value.split(/\n/).map((s) => s.trim()).filter(Boolean).map((l) => l.split("|").map((c) => c.trim())); b.headers = ls[0] || []; b.rows = ls.slice(1); };
+  } else { apply = () => {}; }
+  const ok = document.createElement("button"); ok.className = "mini primary-mini"; ok.textContent = "적용";
+  ok.addEventListener("click", () => { if (apply() !== false) refreshAfterEdit(); });
+  const cancel = document.createElement("button"); cancel.className = "mini"; cancel.textContent = "취소"; cancel.addEventListener("click", () => form.remove());
+  form.appendChild(ok); form.appendChild(cancel);
+  row.appendChild(form); const fi = form.querySelector("input,textarea"); if (fi) fi.focus();
 }
 function addTextAt(index) { cur.article.blocks.splice(index, 0, { type: "paragraph", text: "새 문단 내용을 입력하세요." }); refreshAfterEdit(); }
 function addButtonAt(index, bar) {
