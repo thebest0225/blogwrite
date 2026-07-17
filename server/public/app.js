@@ -33,8 +33,8 @@ async function apiJson(url, opts) {
   if (!r.ok || j.error) throw new Error(j.error || `HTTP ${r.status}`);
   return j;
 }
-const chatComplete = ({ system, user, maxTokens, model }) =>
-  apiJson("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system, user, maxTokens, model, engine: settings?.genEngine }) }).then((j) => j.content);
+const chatComplete = ({ system, user, maxTokens, model, engine }) =>
+  apiJson("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system, user, maxTokens, model, engine: engine || settings?.genEngine }) }).then((j) => j.content);
 const generateImage = ({ prompt, aspectRatio, resolution }) =>
   apiJson("/api/image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, aspect: aspectRatio, resolution }) }).then((j) => j.url);
 const editImage = ({ imageUrl, prompt, aspectRatio, resolution }) =>
@@ -88,6 +88,7 @@ async function init() {
   $("schSave").addEventListener("click", onScheduleSave);
   $("schCancel").addEventListener("click", resetSchForm);
   $("optSave").addEventListener("click", onSaveOptions);
+  $("pmClose").addEventListener("click", closeProgress);
 
   await refreshAccounts();
   updateInboxBadge();
@@ -257,7 +258,44 @@ async function loadDraft(id, title) {
   setStatus(`📥 초안 "${d.title || title}" 불러옴. '계정별 전체 생성'을 누르세요.`);
 }
 
-function setStatus(msg, isError = false) { const el = $("status"); el.textContent = msg; el.classList.remove("hidden"); el.classList.toggle("error", isError); }
+function setStatus(msg, isError = false) { const el = $("status"); el.textContent = msg; el.classList.remove("hidden"); el.classList.toggle("error", isError); if (progressOpen && !isError) progressStep(msg); }
+
+/* ===== 진행상황 모달 ===== */
+let progressOpen = false;
+function openProgress(title) {
+  progressOpen = true;
+  $("pmTitle").textContent = title;
+  $("pmStep").textContent = "준비 중…";
+  $("pmLog").innerHTML = "";
+  $("pmFill").style.width = "2%";
+  $("pmPct").textContent = "";
+  $("pmSpinner").classList.remove("hidden");
+  $("pmClose").classList.add("hidden");
+  $("progressModal").classList.remove("hidden");
+}
+function progressStep(text, pct) {
+  if (!progressOpen) return;
+  $("pmStep").textContent = text;
+  if (typeof pct === "number") progressBar(pct);
+}
+function progressBar(pct) { const p = Math.max(0, Math.min(100, Math.round(pct))); $("pmFill").style.width = p + "%"; $("pmPct").textContent = p + "%"; }
+function progressLog(text, state = "done") {
+  if (!progressOpen) return;
+  const row = document.createElement("div"); row.className = "pm-logrow " + state;
+  const ic = state === "error" ? "solar:close-circle-bold" : (state === "active" ? "solar:refresh-linear" : "solar:check-circle-bold");
+  row.innerHTML = `<iconify-icon icon="${ic}"></iconify-icon><span>${escapeHtml(text)}</span>`;
+  $("pmLog").appendChild(row); $("pmLog").scrollTop = $("pmLog").scrollHeight;
+}
+function progressDone(ok, msg) {
+  if (!progressOpen) return;
+  $("pmSpinner").classList.add("hidden");
+  $("pmClose").classList.remove("hidden");
+  $("pmStep").textContent = msg;
+  $("pmStep").classList.toggle("err", !ok);
+  if (ok) progressBar(100);
+  $("pmTitle").textContent = ok ? "완료" : "오류";
+}
+function closeProgress() { progressOpen = false; $("progressModal").classList.add("hidden"); $("pmStep").classList.remove("err"); }
 function clearStatus() { $("status").classList.add("hidden"); }
 function todayStr() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 function deriveTopic() {
@@ -568,10 +606,16 @@ async function finalizeForAccount(acc, article, keyword, destUrl) {
   }
   return buildHtmlForAccount(acc, article, keyword, destUrl);
 }
+// 목적지(원본 창작)=Claude 공식 API+웹서치 / 쿠션(초안 재가공)=KIE Claude
+function engineForMode() {
+  if (genMode === "destination") return config.claudeEnabled ? "claude" : "kie";
+  return config.kieEnabled ? "kie" : "claude";
+}
 async function chatArticle(built) {
-  let content = await chatComplete({ model: settings.kieChatModel, system: built.system, user: built.user, maxTokens: 16000 });
+  const engine = engineForMode();
+  let content = await chatComplete({ engine, model: settings.kieChatModel, system: built.system, user: built.user, maxTokens: 16000 });
   let article = tryParse(content);
-  if (!article) { content = await chatComplete({ model: settings.kieChatModel, system: built.system, user: built.user + "\n\n(JSON이 끊기지 않게 위 형식의 JSON 객체 하나로만 완결해줘.)", maxTokens: 16000 }); article = tryParse(content); }
+  if (!article) { content = await chatComplete({ engine, model: settings.kieChatModel, system: built.system, user: built.user + "\n\n(JSON이 끊기지 않게 위 형식의 JSON 객체 하나로만 완결해줘.)", maxTokens: 16000 }); article = tryParse(content); }
   if (!article) throw new Error("JSON 파싱 실패: " + (content || "").slice(0, 120));
   return article;
 }
@@ -593,7 +637,13 @@ async function generateAll() {
   }
   const keyword = deriveTopic();
   $("genAll").disabled = true;
+  const modeLabel = genMode === "destination" ? "목적지" : "쿠션";
+  openProgress(`${modeLabel} 글 생성`);
+  const eng = engineForMode();
+  progressLog(`엔진: ${eng === "claude" ? "Claude 공식 API · 웹서치 ON" : "KIE (Claude 모델)"} · 주제: ${keyword || "(원본 기반)"}`, "done");
+  const total = accts.length; let okCount = 0;
   try {
+    progressStep("관련 링크 수집 중…", 5);
     await gatherRelatedLinks(keyword);
     const gk = (a) => genMode + ":" + a.platform;
     const groups = {}; accts.forEach((a) => { (groups[gk(a)] = groups[gk(a)] || []).push(a); });
@@ -601,21 +651,30 @@ async function generateAll() {
     for (const acc of accts) {
       const k = gk(acc); idxIn[k] = (idxIn[k] || 0) + 1;
       const variant = { index: idxIn[k], total: groups[k].length };
-      setStatus(`[${acc.name}] 생성 중… (${++done}/${accts.length})`);
+      const base = 8 + Math.round((done / total) * 88);
+      progressStep(`[${acc.name}] ${eng === "claude" ? "웹서치·작성" : "재가공"} 중… (${done + 1}/${total})`, base);
       let article;
       try { article = await chatArticle(promptForAccount(acc, keyword, variant, destUrl, reference)); }
-      catch (e) { setStatus(`[${acc.name}] 실패: ${e.message}`, true); continue; }
+      catch (e) { progressLog(`✗ ${acc.name} 실패: ${e.message}`, "error"); done++; continue; }
       const html = await finalizeForAccount(acc, article, keyword, destUrl);
       await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ draft_id: activeDraftId, target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated", role: genMode }) }).catch(() => {});
       await storeAdd({ type: "article", title: article.title || "", keyword, platform: acc.platform });
+      okCount++; done++;
+      progressLog(`${acc.name} — ${(article.title || "").slice(0, 40) || "생성됨"}`, "done");
+      progressBar(8 + Math.round((done / total) * 88));
     }
     if (activeDraftId) { await draftStatus(activeDraftId, "used"); renderDrafts(); }
-    setStatus(`✅ ${accts.length}개 ${genMode === "destination" ? "목적지" : "쿠션"} 글 생성 완료. 아래 작업 목록에서 검수·발행하세요.`);
-    showView("board");
-    await renderWorkList();
-    if (workItems[0]) openWork(workItems[0].id);
-  } catch (e) { setStatus("오류: " + e.message, true); }
-  finally { $("genAll").disabled = false; }
+    if (okCount) {
+      progressDone(true, `${okCount}/${total}개 ${modeLabel} 글 생성 완료`);
+      setStatus(`✅ ${okCount}개 ${modeLabel} 글 생성 완료. 작업보드에서 검수·발행하세요.`);
+    } else {
+      progressDone(false, "모든 계정 생성 실패. 키/네트워크를 확인하세요.");
+    }
+  } catch (e) { progressDone(false, "오류: " + e.message); setStatus("오류: " + e.message, true); }
+  finally {
+    $("genAll").disabled = false;
+    if (okCount) { showView("board"); await renderWorkList(); if (workItems[0]) openWork(workItems[0].id); }
+  }
 }
 
 // ---------- 작업 목록 ----------

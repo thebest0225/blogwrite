@@ -230,10 +230,15 @@ async function fetchSignalTrends() {
 app.get("/api/trends", async (req, res) => {
   try {
     if (!req.query.force && trendCache && Date.now() - trendCache.ts < 3600 * 1000) return res.json(trendCache);
-    let items = await fetchGoogleTrends();
-    let src = "google";
-    if (!items.length) { items = await fetchSignalTrends(); src = "signal"; }
-    trendCache = { ts: Date.now(), source: src, items: items.slice(0, 20) };
+    const [google, signal] = await Promise.all([fetchGoogleTrends(), fetchSignalTrends()]);
+    // 병합 + 중복제거(제목 기준). 구글(뉴스맥락 있음) 우선, 그 다음 실검 키워드.
+    const seen = new Set(); const merged = [];
+    for (const it of [...google, ...signal]) {
+      const key = it.title.replace(/\s+/g, "").toLowerCase();
+      if (seen.has(key)) continue; seen.add(key); merged.push(it);
+    }
+    const src = google.length && signal.length ? "google+signal" : (google.length ? "google" : (signal.length ? "signal" : "none"));
+    trendCache = { ts: Date.now(), source: src, items: merged.slice(0, 24) };
     res.json(trendCache);
   } catch (e) { res.json({ ts: Date.now(), source: "none", items: [] }); }
 });

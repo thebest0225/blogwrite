@@ -211,6 +211,22 @@
       </section>
     </main>
   </div>
+
+  <!-- 진행상황 모달 -->
+  <div id="progressModal" class="pm-overlay hidden">
+    <div class="pm-box">
+      <div class="pm-head">
+        <iconify-icon id="pmSpinner" class="pm-spin" icon="solar:restart-linear"></iconify-icon>
+        <h3 id="pmTitle">생성 중</h3>
+        <button id="pmClose" class="mini hidden"><iconify-icon icon="solar:check-circle-bold"></iconify-icon> 닫기</button>
+      </div>
+      <div id="pmStep" class="pm-step">준비 중…</div>
+      <div class="pm-track"><div id="pmFill" class="pm-fill"></div></div>
+      <div id="pmPct" class="pm-pct"></div>
+      <div id="pmLog" class="pm-log"></div>
+    </div>
+  </div>
+
   <script type="module" src="app.js"></script>
 </body>
 </html>
