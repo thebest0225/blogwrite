@@ -14,7 +14,7 @@ const ASPECT_BY_TARGET = { blogger: "4:3", wp: "4:3", naver: "1:1" };
 const LABEL = { blogger: "블로거 메인", naver: "네이버", wp: "워드프레스" };
 
 const DEFAULT_THUMB_STYLE =
-`Premium Korean YouTube-style thumbnail, high click-through, professional editorial quality, sharp focus, cinematic high-contrast dramatic lighting, atmospheric background matching the article's REAL topic. ADAPT the composition to the subject: (a) if a real person is central (celebrity/executive/politician/athlete) render a photorealistic dramatic portrait of that ONE person with expressive emotion and moody rim lighting; (b) if it's a product/object, a bold hero shot of that object; (c) if it's a concept/how-to/issue, a clean modern cinematic scene symbolizing it. Big HEAVY bold Korean sans-serif headline with thick black-and-white outline in the TOP area, bottom third kept clear; Korean text large and PERFECTLY spelled. Readable at small size. NO cartoon mascots, NO stock graphs/arrows/flags/finance clip-art, NO random extra people.`;
+`Ultra eye-catching Korean thumbnail engineered for MAXIMUM click-through, following current top-creator trends (2026). Bold high-saturation color-blocked or duotone background; the main subject POPS off the background with a subtle glow / rim light and shallow depth of field. ONE clear focal subject, uncluttered. ADAPT to the subject: (a) real person central → photorealistic dramatic close-up portrait with strong natural emotion (surprise / serious / curious), moody cinematic rim lighting; (b) product/object → bold hero shot with dramatic lighting; (c) concept/issue/how-to → one striking symbolic cinematic scene. Big HEAVY Korean sans-serif headline (3–6 words) in the TOP area, with a thick contrasting outline AND a solid highlight box behind ONE key word for a strong color pop; keep the bottom third clear. Text must be HUGE, PERFECTLY spelled, and readable as a tiny mobile thumbnail. Premium, punchy, high-contrast — but clean, NOT busy. NO cartoon mascots, NO cheap clip-art graphs/arrows/flags/finance icons, NO random extra people, NO messy collage.`;
 
 const DEFAULTS = {
   genEngine: "claude", kieChatModel: "claude-sonnet-5", imageResolution: "1K",
@@ -161,11 +161,15 @@ async function refreshAccounts() {
 }
 function renderAccPicker() {
   const box = $("genAccPick"); if (!box) return;
+  // 기존 체크 상태 보존(재렌더 시 사용자가 해제한 계정이 다시 체크되지 않도록)
+  const prev = {}; box.querySelectorAll("input").forEach((i) => { prev[i.value] = i.checked; });
+  const hadAny = Object.keys(prev).length > 0;
   const list = accountsForMode(); box.innerHTML = "";
   if (!list.length) { box.innerHTML = `<span class="muted">등록된 ${genMode === "destination" ? "목적지" : "쿠션"} 계정이 없습니다. '계정 관리'에서 추가하세요.</span>`; return; }
   for (const a of list) {
+    const checked = hadAny ? (prev[a.id] !== false) : true;   // 기존에 해제했으면 유지, 새 계정/최초엔 체크
     const lab = document.createElement("label"); lab.className = "acc-pick";
-    lab.innerHTML = `<input type="checkbox" value="${a.id}" checked>`
+    lab.innerHTML = `<input type="checkbox" value="${a.id}" ${checked ? "checked" : ""}>`
       + `<span class="acc-badge ${genMode === "destination" ? "dest" : "cush"}">${PLAT_LABEL[a.platform] || a.platform}</span>`
       + `<span class="nm">${escapeHtml(a.name || "(이름없음)")}</span>`;
     box.appendChild(lab);
@@ -730,7 +734,7 @@ async function genBlockImageAcc(acc, b, article, keyword) {
   let genPrompt = b.prompt || b.alt || keyword;
   const thumbStyle = settings.thumbnailStylePrompt || DEFAULT_THUMB_STYLE;
   if (isThumb && settings.thumbnailMode === "ai_full") {
-    genPrompt = `${thumbStyle}\n\nScene: ${b.prompt || keyword}\n\nRender this EXACT Korean headline, large, bold, correctly spelled: "${headline}"\n\nHARD RULES: Korean headline in the TOP area, bottom clear. If a public figure is central show ONLY ONE person; else clean illustration/graphic-card with NO random people. NO cartoon mascot, graphs, arrows, flags, finance symbols.`;
+    genPrompt = `${thumbStyle}\n\nScene: ${b.prompt || keyword}\n\nRender this EXACT Korean headline, HUGE and bold in the TOP area, perfectly spelled, with a solid highlight box behind the single most important word: "${headline}"\n\nHARD RULES: strong subject-vs-background pop (glow/rim light, shallow DOF), high-contrast punchy but CLEAN composition. If a real person is central show ONLY ONE person with clear emotion; otherwise a bold symbolic scene with NO random people. Bottom third clear. NO cartoon mascot, NO clip-art graphs/arrows/flags/finance icons, NO messy collage.`;
   }
   const aspect = isThumb ? aspectFor(acc) : "4:3";
   b._genPrompt = genPrompt; b._headline = headline; b._isThumb = isThumb; b._aspect = aspect;
