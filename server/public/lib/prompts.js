@@ -85,6 +85,7 @@ const JSON_CONTRACT = `
     {"type":"image","slot":"thumbnail|body","prompt":"이미지 생성 프롬프트(영어 기반, 단 인물의 이름·국적·직업 등 고유 정보는 그 사람 국적의 언어로 표기 — 한국인은 한글 이름이 훨씬 인식 잘 됨). [주제 적응] 글 주제에 유명 인물(연예인·배우·CEO·정치인·대통령 등)이 핵심이면 그 인물 1명을 photorealistic 실사로 묘사하고(예: '한국 배우 김무열, 30대 후반, 특수요원, 어두운 정장, 진지한 표정, cinematic moody lighting'), 특정 유명인이 핵심이 아니면 주제를 상징하는 깔끔한 일러스트/그래픽 카드 느낌(clean modern illustration)으로 만든다. 의상·표정·배경은 글 내용/분위기에 맞춘다. 텍스트/글자는 넣지 말 것(no text, no letters). 고대비·강조 조명, 여백(어두운 영역) 남기기","alt":"한국어 대체텍스트(SEO 키워드 포함)","overlayText":"(thumbnail 전용) 썸네일에 얹을 3~5단어 한국어 후크 문구(짧고 강하게)","linkUrl":"클릭형 이미지면 이동 URL(내부링크 후보나 공식 플랫폼). 아니면 생략 또는 #"}
   ],
   "faq": [{"q":"질문","a":"답변"}],
+  "category": "이 글에 가장 알맞은 카테고리 1개(제공된 목록 중에서만)",
   "relatedKeywords": ["연관검색어1","..."],
   "photoQueries": ["english stock photo query 1","english query 2","english query 3"],
   "tags": ["태그1","..."],
@@ -259,7 +260,9 @@ function variantBlock(v) {
   if (v.style) out += `\n[이 블로그의 톤·디자인 아이덴티티 — 이 스타일로 통일감 있게] "${v.style}" 이 느낌이 살도록 소제목 어조, 리스트/표/요약박스(callout) 사용 방식, 문단 길이를 맞춰라. (블로그마다 색깔이 달라야 한다)\n`;
   return out;
 }
-export function buildBloggerMain({ sourceText, keyword, audience, tone, authorBio, today, imageCount, reference, internalLinks, variant }) {
+const CATEGORIES = ["몰라서 놓친 돈", "신청은 이렇게", "카드·금융 꿀팁", "살림 절약법", "경제 쉽게 읽기", "돈 굴리기"];
+export function buildBloggerMain({ sourceText, keyword, audience, tone, authorBio, today, imageCount, reference, internalLinks, variant, categories }) {
+  const cats = (categories && categories.length) ? categories : CATEGORIES;
   const resolved = resolveType("auto", keyword || "");
   const imgN = Math.min(6, Math.max(1, imageCount || 2));
   const system = EDITOR_SYSTEM;
@@ -277,6 +280,9 @@ ${GLOBAL_RULES}
 ${SEO_TREND}
 ${HUMAN_VOICE}
 ${TYPE_RULES[resolved]}
+
+[카테고리] 이 글에 가장 알맞은 카테고리 하나를 아래 목록에서 골라 category 값에 넣어라(목록에 없는 값 금지):
+${cats.join(" / ")}
 
 [작성 조건]
 - 키워드(있으면 우선): "${keyword || "(원본에서 추론)"}"

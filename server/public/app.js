@@ -58,7 +58,7 @@ const apiTrends = (force) => apiJson(`/api/trends${force ? "?force=1" : ""}`);
 const storeList = () => apiJson("/api/store").then((j) => j.records || []);
 const storeAdd = (rec) => apiJson("/api/store", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rec) }).catch(() => {});
 const storeDelete = (url) => apiJson("/api/store/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) }).catch(() => {});
-const wpCreatePost = ({ title, content, status, destinationId }) => apiJson("/api/wp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, content, status, destinationId }) });
+const wpCreatePost = ({ title, content, status, destinationId, category }) => apiJson("/api/wp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, content, status, destinationId, category }) });
 const accountsApi = () => apiJson("/api/destinations").then((j) => j.destinations || []);
 const accountSave = (dst) => apiJson("/api/destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dst) });
 const accountDelete = (id) => apiJson("/api/destinations/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
@@ -922,7 +922,7 @@ async function chatArticle(built) {
 async function autoPublishWork(acc, wid, article, html, keyword) {
   const isWp = acc.platform === "wordpress";
   const res = isWp
-    ? await wpCreatePost({ title: article.title, content: html, status: "publish", destinationId: acc.id })
+    ? await wpCreatePost({ title: article.title, content: html, status: "publish", destinationId: acc.id, category: article.category })
     : await apiJson("/api/blogger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ destinationId: acc.id, title: article.title, content: html }) });
   if (res && res.link) {
     await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: wid, target: acc.platform, destination_id: acc.id, title: article.title || "", status: "published", published_url: res.link, publish_mode: "auto" }) }).catch(() => {});
@@ -1088,7 +1088,7 @@ async function openWork(id) {
 }
 function renderCur() {
   if (!cur) return;
-  $("metaLine").textContent = `[${cur.acc.name || PLAT_LABEL[cur.target] || cur.target}] ${cur.article.title || ""}` + (cur.resolvedType ? ` · 유형:${cur.resolvedType}` : "") + `\n메타: ${cur.article.metaDescription || "-"}`;
+  $("metaLine").textContent = `[${cur.acc.name || PLAT_LABEL[cur.target] || cur.target}] ${cur.article.title || ""}` + (cur.resolvedType ? ` · 유형:${cur.resolvedType}` : "") + (cur.article.category ? ` · 카테고리:${cur.article.category}` : "") + `\n메타: ${cur.article.metaDescription || "-"}`;
   $("preview").srcdoc = buildPreviewDoc(cur.article.title || "", cur.html);
   $("wpActions").classList.toggle("hidden", cur.target !== "wordpress");
   $("bloggerPublishBtn").classList.toggle("hidden", !(cur.target === "blogger" && cur.acc.has_creds));
@@ -1293,7 +1293,7 @@ async function wpPublish(status) {
   const label = status === "publish" ? "발행" : "초안 저장";
   try {
     setStatus(`[${cur.acc.name || "WP"}] ${label} 중…`);
-    const res = await wpCreatePost({ title: cur.article.title, content: cur.html, status, destinationId: cur.acc.id });
+    const res = await wpCreatePost({ title: cur.article.title, content: cur.html, status, destinationId: cur.acc.id, category: cur.article.category });
     if (res.link) {
       try { await saveMyPost({ title: cur.article.title, url: res.link, keyword: cur.keyword }, (cur.html || "").replace(/<[^>]+>/g, " ").slice(0, 4000)); } catch {}
       if (status === "publish") {

@@ -53,7 +53,7 @@ try { db.exec("ALTER TABLE work_items ADD COLUMN publish_mode TEXT"); } catch {}
 for (const col of [
   "source TEXT DEFAULT 'keyword'", "draft_id TEXT", "run_at TEXT",
   "scope TEXT DEFAULT 'destination'", "publish TEXT DEFAULT 'none'",
-  "status TEXT DEFAULT 'pending'", "last_run TEXT", "result TEXT"
+  "status TEXT DEFAULT 'pending'", "last_run TEXT", "result TEXT", "dest_id TEXT"
 ]) { try { db.exec("ALTER TABLE schedules ADD COLUMN " + col); } catch {} }
 
 // ---- 암호화 (API 키·발행 자격) ----
@@ -212,12 +212,13 @@ export function upsertSchedule(userId, s) {
     name: s.name || "", source: s.source || "keyword", draft_id: s.draft_id || null,
     keywords: s.keywords || "", run_at: s.run_at || null,
     scope: s.scope || "destination", publish: s.publish || "none",
+    dest_id: s.dest_id || null,
     enabled: s.enabled ? 1 : 0,
     // 편집 저장 시 재실행 가능하도록 상태 초기화(완료/오류였어도 pending 으로)
     status: s.status || "pending"
   };
-  if (ex) db.prepare("UPDATE schedules SET name=@name,source=@source,draft_id=@draft_id,keywords=@keywords,run_at=@run_at,scope=@scope,publish=@publish,enabled=@enabled,status=@status WHERE id=@id AND user_id=@uid").run({ ...row, id, uid: uid(userId) });
-  else db.prepare("INSERT INTO schedules(id,user_id,name,source,draft_id,keywords,run_at,scope,publish,enabled,status,created_at) VALUES(@id,@uid,@name,@source,@draft_id,@keywords,@run_at,@scope,@publish,@enabled,@status,@created)").run({ ...row, id, uid: uid(userId), created: now() });
+  if (ex) db.prepare("UPDATE schedules SET name=@name,source=@source,draft_id=@draft_id,keywords=@keywords,run_at=@run_at,scope=@scope,publish=@publish,dest_id=@dest_id,enabled=@enabled,status=@status WHERE id=@id AND user_id=@uid").run({ ...row, id, uid: uid(userId) });
+  else db.prepare("INSERT INTO schedules(id,user_id,name,source,draft_id,keywords,run_at,scope,publish,dest_id,enabled,status,created_at) VALUES(@id,@uid,@name,@source,@draft_id,@keywords,@run_at,@scope,@publish,@dest_id,@enabled,@status,@created)").run({ ...row, id, uid: uid(userId), created: now() });
   return listSchedules(userId);
 }
 export function deleteSchedule(userId, id) { db.prepare("DELETE FROM schedules WHERE user_id=? AND id=?").run(uid(userId), id); return listSchedules(userId); }

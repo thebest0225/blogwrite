@@ -311,14 +311,30 @@ function resolveWp(userId, destId) {
   if (WP_SITE) return { site: normSite(WP_SITE), user: WP_USER, pass: WP_PASS };
   return null;
 }
+// 카테고리 이름 → term id (없으면 생성). WP 발행 시 자동 분류.
+async function wpResolveCategory(site, auth, name) {
+  if (!name || !String(name).trim()) return null; name = String(name).trim();
+  try {
+    const r = await fetch(`${site}/wp-json/wp/v2/categories?search=${encodeURIComponent(name)}&per_page=30`, { headers: { Authorization: auth } });
+    if (r.ok) { const arr = await r.json(); const hit = (arr || []).find((c) => c.name === name); if (hit) return hit.id; }
+    const cr = await fetch(`${site}/wp-json/wp/v2/categories`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+    const cj = await cr.json().catch(() => ({}));
+    if (cr.ok && cj.id) return cj.id;
+    if (cj?.data?.term_id) return cj.data.term_id;
+  } catch {}
+  return null;
+}
 app.post("/api/wp", async (req, res) => {
   const wp = resolveWp(req.userId, req.body?.destinationId);
   if (!wp || !wp.site) return res.status(400).json({ error: "워드프레스 목적지가 설정되지 않았습니다(계정 관리에서 등록)." });
   if (!wp.user || !wp.pass) return res.status(400).json({ error: "이 워드프레스 계정에 사용자명/응용프로그램 비밀번호가 없습니다(계정 관리에서 입력)." });
   try {
-    const { title, content, status = "draft" } = req.body;
+    const { title, content, status = "draft", category } = req.body;
     const auth = "Basic " + Buffer.from(`${wp.user}:${String(wp.pass).replace(/\s+/g, "")}`).toString("base64");
-    const r = await fetch(`${wp.site}/wp-json/wp/v2/posts`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify({ title, content, status }) });
+    const postBody = { title, content, status };
+    const catId = await wpResolveCategory(wp.site, auth, category);
+    if (catId) postBody.categories = [catId];
+    const r = await fetch(`${wp.site}/wp-json/wp/v2/posts`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify(postBody) });
     const text = await r.text();
     let j = {}; try { j = JSON.parse(text); } catch {}
     if (!r.ok) {
@@ -515,11 +531,14 @@ function parseArticle(raw) {
   if (s > 0 || e < t.length - 1) t = t.slice(s, e + 1);
   try { return JSON.parse(t); } catch { return null; }
 }
-async function publishServer(userId, acc, { title, content }) {
+async function publishServer(userId, acc, { title, content, category }) {
   if (acc.platform === "wordpress") {
     const wp = resolveWp(userId, acc.id); if (!wp || !wp.site || !wp.user || !wp.pass) throw new Error("WP 자격 없음(응용프로그램 비밀번호 확인)");
     const auth = "Basic " + Buffer.from(`${wp.user}:${String(wp.pass).replace(/\s+/g, "")}`).toString("base64");
-    const r = await fetch(`${wp.site}/wp-json/wp/v2/posts`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify({ title, content, status: "publish" }) });
+    const body = { title, content, status: "publish" };
+    const catId = await wpResolveCategory(wp.site, auth, category);
+    if (catId) body.categories = [catId];
+    const r = await fetch(`${wp.site}/wp-json/wp/v2/posts`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const j = await r.json(); if (!r.ok) throw new Error(j.message || r.status); return j.link;
   }
   if (acc.platform === "blogger") {
@@ -557,7 +576,8 @@ async function runSchedule(s) {
     if (s.scope === "draft") { DB.setScheduleStatus(s.id, "done", `초안 생성 완료: ${keyword}`); return; }
     // 3) 목적지 생성 (계정별)
     if (!kKey) throw new Error("KIE 키 없음(목적지 생성 불가)");
-    const dests = DB.accountsForGeneration(userId).filter(isDestRoleRow);
+    let dests = DB.accountsForGeneration(userId).filter(isDestRoleRow);
+    if (s.dest_id) dests = dests.filter((d) => d.id === s.dest_id);   // 특정 목적지만 지정 시
     if (!dests.length) throw new Error("목적지 계정이 없음(계정 관리에서 등록)");
     const groups = {}; dests.forEach((a) => { (groups[a.platform] = groups[a.platform] || []).push(a); });
     const idxIn = {}; let made = 0, pub = 0;
@@ -579,7 +599,7 @@ async function runSchedule(s) {
       // 4) 발행 수준
       if (s.publish === "auto" && acc.has_creds) {
         try {
-          const link = await publishServer(userId, acc, { title: article.title, content: html });
+          const link = await publishServer(userId, acc, { title: article.title, content: html, category: article.category });
           if (link) { DB.upsertWorkItem(userId, { id: wid, target: acc.platform, destination_id: acc.id, title: article.title || "", status: "published", published_url: link, publish_mode: "auto" }); DB.addAsset(userId, { url: link, title: article.title, keyword, excerpt: (html || "").replace(/<[^>]+>/g, " ").slice(0, 4000) }); pub++; }
         } catch (e) { /* 발행 실패 시 생성됨 상태로 남겨 수동 처리 */ }
       }
