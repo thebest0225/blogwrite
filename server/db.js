@@ -37,7 +37,13 @@ CREATE TABLE IF NOT EXISTS work_items (
 CREATE INDEX IF NOT EXISTS idx_drafts_user ON drafts(user_id);
 CREATE INDEX IF NOT EXISTS idx_assets_user ON assets(user_id);
 CREATE INDEX IF NOT EXISTS idx_work_user ON work_items(user_id);
+CREATE TABLE IF NOT EXISTS schedules (
+  id TEXT PRIMARY KEY, user_id INTEGER NOT NULL,
+  name TEXT, mode TEXT, keywords TEXT, times_per_day INTEGER DEFAULT 1,
+  auto TEXT DEFAULT 'draft', enabled INTEGER DEFAULT 1, created_at TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_dest_user ON destinations(user_id);
+CREATE INDEX IF NOT EXISTS idx_sched_user ON schedules(user_id);
 `);
 // 계정 역할(목적지/쿠션/겸용) 컬럼 (기존 테이블에도 추가)
 try { db.exec("ALTER TABLE destinations ADD COLUMN role TEXT DEFAULT 'destination'"); } catch {}
@@ -123,6 +129,17 @@ export function accountsForGeneration(userId) {
 
 // ---- 초안함 ----
 export function listDrafts(userId) { return db.prepare("SELECT id,date,status,title,content,keyword,source FROM drafts WHERE user_id=? ORDER BY date DESC").all(uid(userId)); }
+// 수천건 대비 검색·페이지네이션
+export function listDraftsPage(userId, { q = "", status = "", offset = 0, limit = 50 } = {}) {
+  let where = "user_id=?"; const args = [uid(userId)];
+  if (status) { where += " AND status=?"; args.push(status); }
+  if (q) { where += " AND (title LIKE ? OR keyword LIKE ?)"; args.push("%" + q + "%", "%" + q + "%"); }
+  const total = db.prepare(`SELECT COUNT(*) c FROM drafts WHERE ${where}`).get(...args).c;
+  const drafts = db.prepare(`SELECT id,date,status,title,keyword,source,substr(content,1,160) AS preview FROM drafts WHERE ${where} ORDER BY date DESC LIMIT ? OFFSET ?`).all(...args, Math.min(limit, 200), Math.max(0, offset));
+  return { drafts, total };
+}
+export function getDraft(userId, id) { return db.prepare("SELECT * FROM drafts WHERE user_id=? AND id=?").get(uid(userId), id); }
+export function countNewDrafts(userId) { return db.prepare("SELECT COUNT(*) c FROM drafts WHERE user_id=? AND status='new'").get(uid(userId)).c; }
 export function addDraft(userId, d) {
   const rec = { id: rid("d"), user_id: uid(userId), date: now(), status: "new", title: d.title || "(제목없음)", content: d.content || "", keyword: d.keyword || "", source: d.source || "web" };
   db.prepare("INSERT INTO drafts(id,user_id,date,status,title,content,keyword,source) VALUES(@id,@user_id,@date,@status,@title,@content,@keyword,@source)").run(rec);
@@ -174,5 +191,17 @@ export function upsertWorkItem(userId, w) {
   return id;
 }
 export function deleteWorkItem(userId, id) { db.prepare("DELETE FROM work_items WHERE user_id=? AND id=?").run(uid(userId), id); }
+
+// ---- 자동화 예약 ----
+export function listSchedules(userId) { return db.prepare("SELECT * FROM schedules WHERE user_id=? ORDER BY created_at DESC").all(uid(userId)); }
+export function upsertSchedule(userId, s) {
+  const id = s.id || rid("sch");
+  const ex = db.prepare("SELECT id FROM schedules WHERE user_id=? AND id=?").get(uid(userId), id);
+  const vals = [s.name || "", s.mode || "preset", s.keywords || "", parseInt(s.times_per_day, 10) || 1, s.auto || "draft", s.enabled ? 1 : 0];
+  if (ex) db.prepare("UPDATE schedules SET name=?,mode=?,keywords=?,times_per_day=?,auto=?,enabled=? WHERE user_id=? AND id=?").run(...vals, uid(userId), id);
+  else db.prepare("INSERT INTO schedules(id,user_id,name,mode,keywords,times_per_day,auto,enabled,created_at) VALUES(?,?,?,?,?,?,?,?,?)").run(id, uid(userId), ...vals, now());
+  return listSchedules(userId);
+}
+export function deleteSchedule(userId, id) { db.prepare("DELETE FROM schedules WHERE user_id=? AND id=?").run(uid(userId), id); return listSchedules(userId); }
 
 export default db;

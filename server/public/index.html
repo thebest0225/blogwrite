@@ -3,215 +3,197 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>블로그 오토라이터</title>
+  <title>블로그라이터</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="apptitle">✍️ 블로그 오토라이터</div>
-    <button class="icon-btn" id="openOptions" title="설정">⚙️ 설정</button>
-  </header>
+  <div class="app">
+    <!-- 사이드바 -->
+    <aside class="sidebar">
+      <div class="brand">✍️ <span>블로그라이터</span></div>
+      <nav class="nav">
+        <button class="nav-item active" data-view="board"><span class="ni">📋</span> 작업보드</button>
+        <button class="nav-item" data-view="new"><span class="ni">✨</span> 새 글 생성</button>
+        <button class="nav-item" data-view="inbox"><span class="ni">📥</span> 초안함 <span class="nav-badge hidden" id="inboxBadge">0</span></button>
+        <button class="nav-item" data-view="accounts"><span class="ni">🔑</span> 계정 관리</button>
+        <button class="nav-item" data-view="schedule"><span class="ni">⏰</span> 자동화·예약</button>
+        <button class="nav-item" data-view="assets"><span class="ni">🔗</span> 발행 자산</button>
+        <button class="nav-item" data-view="settings"><span class="ni">⚙️</span> 설정</button>
+      </nav>
+      <div class="side-foot muted">MangoHub 계정 연동됨</div>
+    </aside>
 
-  <div id="apiWarn" class="warn hidden">
-    ⚠️ 서버에 KIE API 키가 설정되지 않았습니다. <code>server/.env</code> 의 <code>KIE_API_KEY</code> 를 확인하세요.
+    <!-- 본문 -->
+    <main class="content">
+      <div id="apiWarn" class="warn hidden">⚠️ 생성 엔진 키가 없습니다. <b>설정</b>에서 Anthropic 또는 KIE 키를 입력하세요.</div>
+      <div id="status" class="status hidden"></div>
+
+      <!-- 작업보드 -->
+      <section class="view" data-view="board">
+        <div class="view-head"><h2>작업보드</h2><span class="muted">생성된 글을 검수·발행합니다. 발행하면 목록에서 사라집니다.</span></div>
+        <div id="workDetail" class="card" style="display:none;">
+          <div class="row" style="justify-content:space-between;align-items:center;">
+            <button class="mini" id="workBack">← 목록으로</button>
+            <div class="result-actions">
+              <button class="mini" id="editToggle">✏️ 편집</button>
+              <button class="mini primary-mini" id="copyBtn">📋 HTML 복사</button>
+              <span id="wpActions" class="result-actions hidden">
+                <button class="mini" id="wpDraftBtn">WP 초안</button>
+                <button class="mini primary-mini" id="wpPublishBtn">WP 발행</button>
+              </span>
+            </div>
+          </div>
+          <div class="mainurl-row hidden" id="mainUrlRow">
+            <span class="muted">발행된 목적지(WP) 주소를 저장하면 쿠션이 이 글로 유입됩니다 (WP 발행 버튼 쓰면 자동)</span>
+            <input type="text" id="mainUrlInput" placeholder="https://wp.mangois.love/발행-글" />
+            <button class="mini primary-mini" id="mainUrlSave">목적지 주소 저장</button>
+          </div>
+          <div class="meta-line" id="metaLine"></div>
+          <iframe id="preview" class="preview"></iframe>
+          <div id="editor" class="editor hidden"></div>
+          <details class="imgedit hidden" id="imgEditBox"><summary>🖌️ 이미지 수정 / 다시 생성</summary><div id="imgEditList" class="imgedit-list"></div></details>
+        </div>
+        <div class="card" id="boardListCard">
+          <div id="workList" class="acc-list"></div>
+        </div>
+      </section>
+
+      <!-- 새 글 생성 -->
+      <section class="view hidden" data-view="new">
+        <div class="view-head"><h2>새 글 생성</h2><span class="muted">원본 하나로 등록된 계정마다 각각 다른 글을 생성합니다.</span></div>
+        <div class="card">
+          <label class="field"><span>원본 글 <span class="muted">— claude.ai 등에서 작성(링크·출처 포함). 초안함에서 불러올 수도 있어요.</span></span>
+            <textarea id="originalText" rows="10" placeholder="상세한 원본 글을 붙여넣으세요."></textarea>
+          </label>
+          <label class="field"><span>목적지(워드프레스) URL <span class="muted">— 쿠션 유입 대상. WP 발행하면 자동 세팅</span></span>
+            <input type="text" id="bloggerUrl" placeholder="비우면 기본 목적지·최근 발행글 자동" />
+          </label>
+          <div class="imgrow">
+            <label class="check"><input type="checkbox" id="genImages" /><span>이미지 생성</span></label>
+            <label class="imgcount"><span>개수</span><select id="imgCount"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
+            <label class="imgcount"><span>썸네일 비율</span><select id="imgAspect"><option value="4:3">4:3</option><option value="16:9">16:9</option><option value="1:1">1:1</option></select></label>
+          </div>
+          <p class="muted"><b id="genAccCount">0</b>개 계정에 각각 다른 글을 생성합니다 (목적지→쿠션 순). <a href="#" id="goAccounts">계정 관리 →</a></p>
+          <button class="primary" id="genAll">✨ 계정별 전체 생성</button>
+        </div>
+        <details class="card"><summary class="card-title" style="cursor:pointer;">🔥 지금 뜨는 트렌드 <span class="muted">— 클릭 시 복사</span></summary>
+          <div class="row" style="margin-top:8px;align-items:center;"><span id="trendMeta" class="muted" style="flex:1;"></span><button class="mini" id="trendRefresh">새로고침</button></div>
+          <div id="trendList" class="history-list"></div>
+        </details>
+      </section>
+
+      <!-- 초안함 (수천개 대비: 검색·필터·페이지네이션) -->
+      <section class="view hidden" data-view="inbox">
+        <div class="view-head"><h2>초안함</h2><span class="muted" id="draftsCount"></span><button class="mini" id="draftsRefresh" style="margin-left:auto;">새로고침</button></div>
+        <div class="card">
+          <div class="row" style="gap:8px;flex-wrap:wrap;">
+            <input type="text" id="draftSearch" placeholder="제목·키워드 검색" style="flex:1;min-width:180px;" />
+            <select id="draftFilter" style="width:auto;">
+              <option value="">전체</option><option value="new">새 초안</option><option value="used">사용됨</option>
+            </select>
+          </div>
+          <div id="draftsList" class="history-list" style="margin-top:10px;"></div>
+          <div class="row" style="justify-content:center;margin-top:10px;"><button class="mini hidden" id="draftsMore">더 보기</button></div>
+        </div>
+      </section>
+
+      <!-- 자동화·예약 -->
+      <section class="view hidden" data-view="schedule">
+        <div class="view-head"><h2>자동화 · 예약</h2><span class="muted">키워드/트렌드로 자동 초안 생성 + 목적지 자동발행 (부재중용)</span></div>
+        <div class="card">
+          <div id="scheduleList" class="acc-list"></div>
+        </div>
+        <div class="card">
+          <div class="card-title" style="margin-bottom:10px;">예약 추가</div>
+          <div class="grid2">
+            <label class="field"><span>이름</span><input type="text" id="schName" placeholder="예: 매일 트렌드 자동" /></label>
+            <label class="field"><span>방식</span><select id="schMode"><option value="preset">지정 키워드</option><option value="trend">트렌드/이슈 자동탐색</option></select></label>
+          </div>
+          <label class="field" id="schKwRow"><span>키워드 목록 (쉼표/줄바꿈 구분)</span><textarea id="schKeywords" rows="2" placeholder="예: 제주여행, 갤럭시 S26, ..."></textarea></label>
+          <div class="grid2">
+            <label class="field"><span>하루 횟수</span><select id="schTimes"><option>1</option><option>2</option><option>3</option><option>4</option><option>6</option></select></label>
+            <label class="field"><span>목적지 자동발행</span><select id="schAuto"><option value="draft">초안만 생성(초안함)</option><option value="publish">목적지까지 자동발행</option></select></label>
+          </div>
+          <label class="check"><input type="checkbox" id="schEnabled" checked /><span>활성화</span></label>
+          <p class="muted">※ 자동 초안은 서버의 Claude(웹서치)로 작성됩니다. 실행 엔진은 다음 단계에 연결됩니다(예약은 지금 저장·관리 가능).</p>
+          <div class="row" style="justify-content:flex-end;gap:8px;"><input type="hidden" id="schEditId" /><button class="mini" id="schCancel">초기화</button><button class="mini primary-mini" id="schSave">예약 저장</button></div>
+        </div>
+      </section>
+
+      <!-- 계정 관리 -->
+      <section class="view hidden" data-view="accounts">
+        <div class="view-head"><h2>계정 관리</h2><span class="muted">목적지·쿠션 블로그 계정(다수). 계정마다 각각 다른 글이 생성됩니다.</span></div>
+        <div class="card"><div id="accountsList" class="acc-list"></div></div>
+        <div class="card">
+          <div class="card-title" style="margin-bottom:10px;">계정 추가 / 수정</div>
+          <div class="grid2">
+            <label class="field"><span>계정 이름</span><input type="text" id="accName" placeholder="예: 내 워드프레스 A" /></label>
+            <label class="field"><span>플랫폼</span><select id="accPlatform"><option value="wordpress">워드프레스</option><option value="blogger">블로거</option><option value="naver">네이버</option></select></label>
+          </div>
+          <div class="grid2">
+            <label class="field"><span>역할</span><select id="accRole"><option value="destination">목적지</option><option value="cushion">쿠션</option><option value="both">겸용</option></select></label>
+            <label class="check" style="align-self:end;"><input type="checkbox" id="accDefault" /><span>이 역할의 기본 계정</span></label>
+          </div>
+          <label class="field"><span>사이트/블로그 주소</span><input type="text" id="accSite" placeholder="https://... (WP=사이트 URL, 블로거=블로그 주소)" /></label>
+          <div class="grid2" id="accWpCreds">
+            <label class="field"><span>WP 사용자명</span><input type="text" id="accWpUser" autocomplete="off" /></label>
+            <label class="field"><span>WP 앱 비밀번호</span><input type="password" id="accWpPw" autocomplete="off" /></label>
+          </div>
+          <p class="muted" id="accHint"></p>
+          <div class="row" style="justify-content:flex-end;gap:8px;"><input type="hidden" id="accEditId" /><button class="mini" id="accCancel">초기화</button><button class="mini primary-mini" id="accSave">계정 저장</button></div>
+        </div>
+      </section>
+
+      <!-- 발행 자산 -->
+      <section class="view hidden" data-view="assets">
+        <div class="view-head"><h2>발행 자산</h2><span class="muted" id="myPostsCount">— 발행 글이 연관 링크로 자동 활용됩니다</span></div>
+        <div class="card">
+          <div class="row"><input type="text" id="myPostSearch" placeholder="검색 (제목/키워드)" /></div>
+          <div class="row" style="margin-top:6px;"><input type="text" id="myPostTitle" placeholder="글 제목/키워드" /></div>
+          <div class="row" style="margin-top:6px;"><input type="text" id="myPostUrl" placeholder="https://발행된-내글-주소" /><button class="mini" id="myPostAdd">추가</button></div>
+          <div id="myPostsList" class="history-list" style="margin-top:10px;"></div>
+        </div>
+      </section>
+
+      <!-- 설정 -->
+      <section class="view hidden" data-view="settings">
+        <div class="view-head"><h2>설정</h2><span class="muted">내 계정 전용. API 키는 암호화 저장(비우면 유지).</span></div>
+        <div class="card optform">
+          <div class="opt-sec">🔑 API 키</div>
+          <label class="field"><span>Anthropic API 키 (Claude 웹서치 생성) <span id="hasAnthropic" class="muted"></span></span><input type="password" id="optAnthropicKey" placeholder="sk-ant-..." autocomplete="off" /></label>
+          <label class="field"><span>KIE API 키 (이미지 생성) <span id="hasKie" class="muted"></span></span><input type="password" id="optKieKey" autocomplete="off" /></label>
+          <div class="grid2">
+            <label class="field"><span>네이버 Client ID <span id="hasNid" class="muted"></span></span><input type="password" id="optNaverId" autocomplete="off" /></label>
+            <label class="field"><span>네이버 Client Secret <span id="hasNsec" class="muted"></span></span><input type="password" id="optNaverSecret" autocomplete="off" /></label>
+          </div>
+          <div class="opt-sec">✍️ 생성 설정</div>
+          <div class="grid2">
+            <label class="field"><span>글 생성 엔진</span><select id="optEngine"><option value="claude">Claude API (웹서치·권장)</option><option value="kie">KIE (저렴)</option></select></label>
+            <label class="field"><span>KIE 모델</span><select id="optChatModel"><option value="claude-sonnet-5">Sonnet 5</option><option value="claude-opus-4-8">Opus 4.8</option></select></label>
+          </div>
+          <div class="grid2">
+            <label class="field"><span>썸네일 방식</span><select id="optThumbMode"><option value="ai_full">AI 통짜</option><option value="overlay">AI+텍스트</option><option value="off">끄기</option></select></label>
+            <label class="field"><span>이미지 해상도</span><select id="optImgRes"><option>1K</option><option>2K</option><option>4K</option></select></label>
+          </div>
+          <div class="grid2">
+            <label class="field"><span>링크 처리</span><select id="optLinkMode"><option value="search">검색결과로 안전</option><option value="model">모델 URL</option></select></label>
+            <label class="field"><span>오버레이 액센트</span><input type="color" id="optAccent" value="#ff2d55" /></label>
+          </div>
+          <label class="field"><span>내 블로그/사이트 (기본 목적지)</span><input type="text" id="optMyBlog" /></label>
+          <div class="grid2">
+            <label class="field"><span>기본 톤</span><input type="text" id="optTone" /></label>
+            <label class="field"><span>대상 독자</span><input type="text" id="optAudience" /></label>
+          </div>
+          <label class="field"><span>저자 소개 (E-E-A-T)</span><textarea id="optAuthorBio" rows="2"></textarea></label>
+          <label class="field"><span>썸네일 스타일 지시 (비우면 기본)</span><textarea id="optThumbStyle" rows="2"></textarea></label>
+          <label class="check"><input type="checkbox" id="optAdEnabled" /><span>애드센스 광고 자동 삽입</span></label>
+          <label class="field"><span>광고 유닛 HTML</span><textarea id="optAdCode" rows="2"></textarea></label>
+          <div class="row" style="justify-content:flex-end;"><button class="primary" id="optSave" style="width:auto;padding:11px 24px;">설정 저장</button></div>
+        </div>
+      </section>
+    </main>
   </div>
-
-  <main class="wrap">
-    <!-- 1) 원본 글 (하나만 붙여넣으면 3종 모두 생성) -->
-    <section class="card">
-      <div class="card-title">1. 원본 글 붙여넣기 <span class="muted">— claude.ai 등에서 작성한 상세 글 하나로 블로거·네이버·워드프레스를 모두 만듭니다</span></div>
-      <textarea id="originalText" rows="9" placeholder="claude.ai에서 작성한 상세 글(링크·출처 포함)을 여기에 붙여넣으세요. 이 글 하나로 3종을 생성합니다."></textarea>
-
-      <div class="opt-grid">
-        <label class="field">
-          <span>목적지(워드프레스) URL <span class="muted">— 블로거·네이버 쿠션이 유입시킬 곳. WP 발행하면 자동 세팅</span></span>
-          <input type="text" id="bloggerUrl" placeholder="https://wp.mangois.love/글주소 (비우면 최근 발행글·설정값 자동)" />
-        </label>
-        <div class="imgrow">
-          <label class="check"><input type="checkbox" id="genImages" /><span>이미지 생성</span></label>
-          <label class="imgcount"><span>개수</span>
-            <select id="imgCount"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select>
-          </label>
-          <label class="imgcount"><span>비율</span>
-            <select id="imgAspect"><option value="4:3">4:3</option><option value="16:9">16:9</option><option value="1:1">1:1</option></select>
-          </label>
-        </div>
-      </div>
-
-      <details class="history" id="draftsBox" open>
-        <summary>📥 초안함 (Claude/MCP로 받은 초안 · 클릭 시 원본으로 불러오기)</summary>
-        <div class="row" style="margin-top:8px;align-items:center;">
-          <span id="draftsCount" class="muted" style="flex:1;"></span>
-          <button class="mini" id="draftsRefresh">새로고침</button>
-        </div>
-        <div id="draftsList" class="history-list"></div>
-      </details>
-
-      <details class="history" id="trendBox">
-        <summary>🔥 지금 뜨는 트렌드 (참고용 · 클릭 시 주제 복사)</summary>
-        <div class="row" style="margin-top:8px;align-items:center;">
-          <span id="trendMeta" class="muted" style="flex:1;"></span>
-          <button class="mini" id="trendRefresh">새로고침</button>
-        </div>
-        <div id="trendList" class="history-list"></div>
-      </details>
-
-      <details class="history" id="myPostsBox">
-        <summary>🔗 발행 글 보관함 (DB에 누적 · 쿠션·연관글 링크로 자동 활용)</summary>
-        <div class="row" style="margin-top:8px;">
-          <input type="text" id="myPostSearch" placeholder="보관함 검색 (제목/키워드)" />
-        </div>
-        <div class="row" style="margin-top:6px;">
-          <input type="text" id="myPostTitle" placeholder="글 제목/키워드" />
-        </div>
-        <div class="row" style="margin-top:6px;">
-          <input type="text" id="myPostUrl" placeholder="https://발행된-내글-주소" />
-          <button class="mini" id="myPostAdd">추가</button>
-        </div>
-        <div id="myPostsCount" class="hist-count"></div>
-        <div id="myPostsList" class="history-list" style="margin-top:6px;"></div>
-      </details>
-    </section>
-
-    <!-- 계정 관리 (다수: 목적지/쿠션, WP/블로거/네이버) -->
-    <details class="card" id="accountsCard">
-      <summary class="card-title" style="cursor:pointer;">🔑 계정 관리 <span class="muted">— 목적지·쿠션 블로그 계정(다수). 계정마다 각각 다른 글이 생성됩니다</span></summary>
-      <div id="accountsList" class="acc-list"></div>
-      <div class="acc-form">
-        <div class="grid2">
-          <label class="field"><span>계정 이름</span><input type="text" id="accName" placeholder="예: 내 워드프레스 A" /></label>
-          <label class="field"><span>플랫폼</span>
-            <select id="accPlatform"><option value="wordpress">워드프레스</option><option value="blogger">블로거</option><option value="naver">네이버</option></select>
-          </label>
-        </div>
-        <div class="grid2">
-          <label class="field"><span>역할</span>
-            <select id="accRole"><option value="destination">목적지</option><option value="cushion">쿠션</option><option value="both">겸용</option></select>
-          </label>
-          <label class="check" style="align-self:end;"><input type="checkbox" id="accDefault" /><span>이 역할의 기본 계정</span></label>
-        </div>
-        <label class="field"><span>사이트/블로그 주소</span><input type="text" id="accSite" placeholder="https://... (WP는 사이트 URL, 블로거는 블로그 주소)" /></label>
-        <div class="grid2" id="accWpCreds">
-          <label class="field"><span>WP 사용자명</span><input type="text" id="accWpUser" placeholder="워드프레스 계정" autocomplete="off" /></label>
-          <label class="field"><span>WP 앱 비밀번호</span><input type="password" id="accWpPw" placeholder="응용프로그램 비밀번호" autocomplete="off" /></label>
-        </div>
-        <p class="muted" id="accHint"></p>
-        <div class="row" style="justify-content:flex-end;gap:8px;">
-          <input type="hidden" id="accEditId" />
-          <button class="mini" id="accCancel">초기화</button>
-          <button class="mini primary-mini" id="accSave">계정 저장</button>
-        </div>
-      </div>
-    </details>
-
-    <!-- 2) 생성 (등록된 계정마다 각각 다른 글) -->
-    <section class="card">
-      <div class="card-title">2. 생성</div>
-      <p class="muted" style="margin:.2em 0 .8em;">원본(또는 초안함 선택)으로 <b id="genAccCount">0</b>개 계정에 <b>각각 다른 글</b>을 생성합니다. (목적지→쿠션 순, 같은 플랫폼도 서로 다르게)</p>
-      <button class="primary" id="genAll">✨ 계정별 전체 생성</button>
-      <div id="status" class="status hidden" style="margin-top:10px;"></div>
-    </section>
-
-    <!-- 3) 작업 목록 (칸반) + 상세 -->
-    <section class="card" id="resultCard" style="display:none;">
-      <div class="card-title">3. 작업 목록 <span class="muted">— 계정별 결과. 발행하면 목록에서 사라집니다</span></div>
-      <div id="workList" class="acc-list"></div>
-
-      <div id="workDetail" style="display:none;margin-top:10px;border-top:1px solid var(--line);padding-top:12px;">
-      <!-- 목적지(WP) 발행 URL 저장 -->
-      <div class="mainurl-row hidden" id="mainUrlRow">
-        <span class="muted">발행된 워드프레스 주소를 저장하면 블로거·네이버 쿠션이 이 글로 유입됩니다 → (WP 발행 버튼 쓰면 자동)</span>
-        <input type="text" id="mainUrlInput" placeholder="https://wp.mangois.love/발행된-글-주소" />
-        <button class="mini primary-mini" id="mainUrlSave">목적지 주소 저장</button>
-      </div>
-
-      <div class="result-head">
-        <div class="meta-line" id="metaLine"></div>
-        <div class="result-actions">
-          <button class="mini" id="editToggle">✏️ 편집</button>
-          <button class="mini primary-mini" id="copyBtn">📋 HTML 복사</button>
-          <span id="wpActions" class="result-actions hidden">
-            <button class="mini" id="wpDraftBtn">WP 초안</button>
-            <button class="mini primary-mini" id="wpPublishBtn">WP 발행</button>
-          </span>
-        </div>
-      </div>
-      <iframe id="preview" class="preview"></iframe>
-      <div id="editor" class="editor hidden"></div>
-      <details class="imgedit hidden" id="imgEditBox">
-        <summary>🖌️ 이미지 수정 / 다시 생성</summary>
-        <div id="imgEditList" class="imgedit-list"></div>
-      </details>
-      </div><!-- /workDetail -->
-    </section>
-  </main>
-
-  <!-- 설정 모달 -->
-  <dialog id="optionsDialog" class="optdlg">
-    <form method="dialog" class="optform" id="optForm">
-      <h3>설정</h3>
-      <p class="muted">내 계정 전용. API 키는 암호화되어 저장됩니다. (입력란을 비워두면 기존 키 유지)</p>
-
-      <div class="opt-sec">🔑 API 키 (내 계정)</div>
-      <label class="field"><span>Anthropic API 키 (Claude 웹서치 생성용) <span id="hasAnthropic" class="muted"></span></span>
-        <input type="password" id="optAnthropicKey" placeholder="sk-ant-... (비우면 유지)" autocomplete="off" />
-      </label>
-      <label class="field"><span>KIE API 키 (이미지 생성용) <span id="hasKie" class="muted"></span></span>
-        <input type="password" id="optKieKey" placeholder="비우면 유지" autocomplete="off" />
-      </label>
-      <div class="grid2">
-        <label class="field"><span>네이버 Client ID <span id="hasNid" class="muted"></span></span>
-          <input type="password" id="optNaverId" placeholder="비우면 유지" autocomplete="off" />
-        </label>
-        <label class="field"><span>네이버 Client Secret <span id="hasNsec" class="muted"></span></span>
-          <input type="password" id="optNaverSecret" placeholder="비우면 유지" autocomplete="off" />
-        </label>
-      </div>
-
-      <div class="opt-sec">✍️ 생성 설정</div>
-      <label class="field"><span>글 생성 엔진</span>
-        <select id="optEngine">
-          <option value="claude">Claude API (웹서치 O · 링크 정확 · 권장)</option>
-          <option value="kie">KIE (웹서치 X · 저렴)</option>
-        </select>
-      </label>
-      <label class="field"><span>글 생성 모델 (KIE 엔진일 때)</span>
-        <select id="optChatModel">
-          <option value="claude-sonnet-5">Claude Sonnet 5 (기본·빠름)</option>
-          <option value="claude-opus-4-8">Claude Opus 4.8 (고품질·느림)</option>
-        </select>
-      </label>
-      <div class="grid2">
-        <label class="field"><span>썸네일 방식</span>
-          <select id="optThumbMode"><option value="ai_full">AI 통짜(한글까지)</option><option value="overlay">AI배경+텍스트</option><option value="off">끄기</option></select>
-        </label>
-        <label class="field"><span>이미지 해상도</span>
-          <select id="optImgRes"><option value="1K">1K</option><option value="2K">2K</option><option value="4K">4K</option></select>
-        </label>
-      </div>
-      <div class="grid2">
-        <label class="field"><span>링크 처리</span>
-          <select id="optLinkMode"><option value="search">검색결과로 안전</option><option value="model">모델 URL 사용</option></select>
-        </label>
-        <label class="field"><span>오버레이 액센트</span><input type="color" id="optAccent" value="#ff2d55" /></label>
-      </div>
-      <label class="field"><span>내 블로그/사이트 주소 (기본 목적지)</span><input type="text" id="optMyBlog" placeholder="https://내도메인.com" /></label>
-      <div class="grid2">
-        <label class="field"><span>기본 톤</span><input type="text" id="optTone" /></label>
-        <label class="field"><span>대상 독자</span><input type="text" id="optAudience" /></label>
-      </div>
-      <label class="field"><span>저자 소개 (E-E-A-T · 글 하단)</span><textarea id="optAuthorBio" rows="2"></textarea></label>
-      <label class="field"><span>썸네일 스타일 지시 (비우면 기본값)</span><textarea id="optThumbStyle" rows="3"></textarea></label>
-      <label class="check"><input type="checkbox" id="optAdEnabled" /><span>애드센스 광고 자동 삽입</span></label>
-      <label class="field"><span>광고 유닛 HTML</span><textarea id="optAdCode" rows="2"></textarea></label>
-      <div class="optbtns">
-        <button type="button" class="mini" id="optClose">닫기</button>
-        <button type="button" class="mini primary-mini" id="optSave">저장</button>
-      </div>
-    </form>
-  </dialog>
-
   <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -250,11 +250,17 @@ app.get("/api/store", (req, res) => res.json({ records: DB.listAssets(req.userId
 app.post("/api/store", (req, res) => { const b = req.body || {}; if (b.type === "post" && b.url) DB.addAsset(req.userId, { url: b.url, title: b.title, keyword: b.keyword, excerpt: b.body }); res.json({ ok: true }); });
 app.post("/api/store/delete", (req, res) => { if (req.body?.url) DB.deleteAsset(req.userId, req.body.url); res.json({ ok: true }); });
 
-// ---- 초안함 ----
-app.get("/api/drafts", (req, res) => res.json({ drafts: DB.listDrafts(req.userId) }));
+// ---- 초안함 (검색·페이지네이션) ----
+app.get("/api/drafts", (req, res) => res.json(DB.listDraftsPage(req.userId, { q: req.query.q || "", status: req.query.status || "", offset: parseInt(req.query.offset, 10) || 0, limit: parseInt(req.query.limit, 10) || 50 })));
+app.get("/api/drafts/:id", (req, res) => { const d = DB.getDraft(req.userId, req.params.id); d ? res.json(d) : res.status(404).json({ error: "not found" }); });
 app.post("/api/drafts", (req, res) => res.json({ ok: true, draft: DB.addDraft(req.userId, req.body || {}) }));
 app.post("/api/drafts/delete", (req, res) => { if (req.body?.id) DB.deleteDraft(req.userId, req.body.id); res.json({ ok: true }); });
 app.post("/api/drafts/status", (req, res) => { if (req.body?.id) DB.setDraftStatus(req.userId, req.body.id, req.body.status); res.json({ ok: true }); });
+
+// ---- 자동화 예약 ----
+app.get("/api/schedules", (req, res) => res.json({ schedules: DB.listSchedules(req.userId) }));
+app.post("/api/schedules", (req, res) => res.json({ ok: true, schedules: DB.upsertSchedule(req.userId, req.body || {}) }));
+app.post("/api/schedules/delete", (req, res) => res.json({ ok: true, schedules: DB.deleteSchedule(req.userId, req.body?.id) }));
 
 // ---- 목적지 관리 ----
 app.get("/api/destinations", (req, res) => res.json({ destinations: DB.listDestinations(req.userId) }));
@@ -286,7 +292,8 @@ app.get("/api/config", (req, res) => {
     claudeEnabled: !!s.anthropicKey || !!ANTHROPIC_KEY,
     wpEnabled: DB.listDestinations(req.userId).some((d) => d.platform === "wordpress") || !!WP_SITE,
     naverEnabled: !!s.naverClientId || !!NAVER_ID,
-    defaultEngine: s.genEngine || DEFAULT_ENGINE
+    defaultEngine: s.genEngine || DEFAULT_ENGINE,
+    newDrafts: DB.countNewDrafts(req.userId)
   });
 });
 // 생성 대상 계정 목록(계정마다 각각 다른 글 생성)

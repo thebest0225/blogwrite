@@ -64,30 +64,49 @@ async function init() {
   if (settings.myBlogUrl && !$("bloggerUrl").value) $("bloggerUrl").value = settings.myBlogUrl;
   if (!config.kieEnabled) $("apiWarn").classList.remove("hidden");
 
-  $("openOptions").addEventListener("click", openOptions);
+  document.querySelectorAll(".nav-item").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
+  $("goAccounts")?.addEventListener("click", (e) => { e.preventDefault(); showView("accounts"); });
   $("genAll").addEventListener("click", generateAll);
   $("editToggle").addEventListener("click", toggleEdit);
   $("copyBtn").addEventListener("click", onCopy);
   $("wpDraftBtn").addEventListener("click", () => wpPublish("draft"));
   $("wpPublishBtn").addEventListener("click", () => wpPublish("publish"));
   $("mainUrlSave").addEventListener("click", onSaveMainUrl);
+  $("workBack").addEventListener("click", () => { cur = null; $("workDetail").style.display = "none"; });
   $("myPostAdd").addEventListener("click", onAddMyPost);
   $("myPostSearch").addEventListener("input", () => renderMyPosts());
   $("trendRefresh").addEventListener("click", () => renderTrends(true));
-  $("trendBox").addEventListener("toggle", (e) => { if (e.target.open) renderTrends(false); });
-  $("draftsRefresh").addEventListener("click", renderDrafts);
-  $("draftsBox").addEventListener("toggle", (e) => { if (e.target.open) renderDrafts(); });
-  $("accountsCard").addEventListener("toggle", (e) => { if (e.target.open) renderAccounts(); });
+  $("draftsRefresh").addEventListener("click", () => renderDrafts(true));
+  $("draftSearch").addEventListener("input", () => { clearTimeout(_dq); _dq = setTimeout(() => renderDrafts(true), 300); });
+  $("draftFilter").addEventListener("change", () => renderDrafts(true));
+  $("draftsMore").addEventListener("click", () => renderDrafts(false));
   $("accPlatform").addEventListener("change", updateAccForm);
   $("accSave").addEventListener("click", onAccountSave);
   $("accCancel").addEventListener("click", resetAccForm);
-  $("optClose").addEventListener("click", () => $("optionsDialog").close());
+  $("schMode").addEventListener("change", updateSchForm);
+  $("schSave").addEventListener("click", onScheduleSave);
+  $("schCancel").addEventListener("click", resetSchForm);
   $("optSave").addEventListener("click", onSaveOptions);
 
-  renderMyPosts();
-  renderDrafts();
-  refreshAccounts();
-  renderWorkList();
+  await refreshAccounts();
+  updateInboxBadge();
+  showView("board");
+}
+let _dq = null;
+function showView(name) {
+  document.querySelectorAll(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
+  document.querySelectorAll(".view").forEach((v) => v.classList.toggle("hidden", v.dataset.view !== name));
+  if (name === "board") renderWorkList();
+  else if (name === "inbox") renderDrafts(true);
+  else if (name === "accounts") renderAccounts();
+  else if (name === "assets") renderMyPosts();
+  else if (name === "schedule") renderSchedules();
+  else if (name === "new") { refreshAccounts(); }
+  else if (name === "settings") populateSettings();
+  window.scrollTo({ top: 0 });
+}
+async function updateInboxBadge() {
+  try { const c = (await apiJson("/api/config")).newDrafts || 0; const b = $("inboxBadge"); b.textContent = c; b.classList.toggle("hidden", !c); } catch {}
 }
 let accounts = [];
 async function refreshAccounts() {
@@ -136,7 +155,7 @@ function loadAccForEdit(a) {
   $("accRole").value = a.role || "destination"; $("accSite").value = a.site_url || "";
   $("accDefault").checked = !!a.is_default; $("accWpUser").value = ""; $("accWpPw").value = "";
   updateAccForm(); $("accSave").textContent = "수정 저장"; $("accHint").textContent += " (자격증명 비워두면 기존 유지)";
-  $("accountsCard").scrollIntoView({ behavior: "smooth" });
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 async function onAccountSave() {
   const dst = {
@@ -153,31 +172,64 @@ async function onAccountSave() {
   catch (e) { setStatus("계정 저장 실패: " + e.message, true); }
 }
 
-// ---------- 초안함 (MCP/Claude로 받은 초안) ----------
-async function renderDrafts() {
-  const box = $("draftsList"); if (!box) return;
-  let drafts = []; try { drafts = await draftsList(); } catch {}
-  const newCnt = drafts.filter((d) => d.status === "new").length;
-  $("draftsCount").textContent = drafts.length ? `총 ${drafts.length}개 · 새 초안 ${newCnt}개` : "받은 초안이 없습니다. (Claude/MCP에서 전송)";
+// ---------- 자동화·예약 ----------
+function updateSchForm() { $("schKwRow").style.display = $("schMode").value === "preset" ? "" : "none"; }
+function resetSchForm() { $("schEditId").value = ""; $("schName").value = ""; $("schKeywords").value = ""; $("schMode").value = "preset"; $("schTimes").value = "1"; $("schAuto").value = "draft"; $("schEnabled").checked = true; updateSchForm(); $("schSave").textContent = "예약 저장"; }
+async function renderSchedules() {
+  const box = $("scheduleList"); let list = [];
+  try { list = await apiJson("/api/schedules").then((j) => j.schedules || []); } catch {}
   box.innerHTML = "";
-  if (!drafts.length) { box.innerHTML = '<div class="hist-empty">초안이 없습니다. Claude에서 초안을 작성해 전송하면 여기 쌓입니다.</div>'; return; }
-  for (const d of drafts.slice(0, 40)) {
+  if (!list.length) { box.innerHTML = '<div class="hist-empty">등록된 예약이 없습니다. 아래에서 추가하세요.</div>'; updateSchForm(); return; }
+  for (const s of list) {
+    const row = document.createElement("div"); row.className = "acc-row";
+    row.innerHTML = `<span class="acc-badge ${s.enabled ? "dest" : "cush"}">${s.enabled ? "ON" : "OFF"}</span>`
+      + `<span class="acc-plat">${s.mode === "trend" ? "트렌드탐색" : "지정키워드"} · 하루 ${s.times_per_day}회 · ${s.auto === "publish" ? "자동발행" : "초안만"}</span>`
+      + `<span class="nm">${s.name || "(이름없음)"}</span>`;
+    const edit = document.createElement("button"); edit.className = "hist-del"; edit.textContent = "✎";
+    edit.addEventListener("click", () => { $("schEditId").value = s.id; $("schName").value = s.name || ""; $("schMode").value = s.mode; $("schKeywords").value = s.keywords || ""; $("schTimes").value = String(s.times_per_day || 1); $("schAuto").value = s.auto || "draft"; $("schEnabled").checked = !!s.enabled; updateSchForm(); $("schSave").textContent = "수정 저장"; });
+    const del = document.createElement("button"); del.className = "hist-del"; del.textContent = "✕";
+    del.addEventListener("click", async () => { if (confirm("예약을 삭제할까요?")) { await apiJson("/api/schedules/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: s.id }) }).catch(() => {}); renderSchedules(); } });
+    row.appendChild(edit); row.appendChild(del); box.appendChild(row);
+  }
+  updateSchForm();
+}
+async function onScheduleSave() {
+  const s = { id: $("schEditId").value || undefined, name: $("schName").value.trim(), mode: $("schMode").value, keywords: $("schKeywords").value.trim(), times_per_day: parseInt($("schTimes").value, 10) || 1, auto: $("schAuto").value, enabled: $("schEnabled").checked };
+  if (!s.name) { setStatus("예약 이름을 입력하세요.", true); return; }
+  try { await apiJson("/api/schedules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(s) }); resetSchForm(); renderSchedules(); setStatus("✅ 예약 저장됨 (실행 엔진은 다음 단계 연결)"); }
+  catch (e) { setStatus("예약 저장 실패: " + e.message, true); }
+}
+
+// ---------- 초안함 (MCP/Claude로 받은 초안) ----------
+let _draftOffset = 0; const DRAFT_PAGE = 50;
+async function renderDrafts(reset) {
+  const box = $("draftsList"); if (!box) return;
+  if (reset) { _draftOffset = 0; box.innerHTML = ""; }
+  const q = $("draftSearch")?.value?.trim() || "";
+  const status = $("draftFilter")?.value || "";
+  let data = { drafts: [], total: 0 };
+  try { data = await apiJson(`/api/drafts?q=${encodeURIComponent(q)}&status=${status}&offset=${_draftOffset}&limit=${DRAFT_PAGE}`); } catch {}
+  $("draftsCount").textContent = data.total ? `총 ${data.total}개` : "초안이 없습니다 (Claude/MCP에서 전송)";
+  if (reset && !data.drafts.length) { box.innerHTML = '<div class="hist-empty">초안이 없습니다. Claude에서 작성해 전송하면 여기 쌓입니다.</div>'; }
+  for (const d of data.drafts) {
     const row = document.createElement("div"); row.className = "hist-item";
     const b = document.createElement("button"); b.className = "hist-load";
     const tag = d.status === "used" ? "✅ " : (d.status === "new" ? "🆕 " : "");
-    b.textContent = tag + (d.title || "(제목없음)") + (d.keyword ? ` · ${d.keyword}` : "");
-    b.title = "클릭하면 원본 글로 불러옵니다";
-    b.addEventListener("click", () => loadDraft(d));
+    b.innerHTML = `<b>${tag}${(d.title || "(제목없음)")}</b>${d.keyword ? ` · ${d.keyword}` : ""}<div class="muted" style="font-weight:400;white-space:normal;">${(d.preview || "").replace(/</g, "&lt;")}…</div>`;
+    b.addEventListener("click", () => loadDraft(d.id, d.title));
     const del = document.createElement("button"); del.className = "hist-del"; del.textContent = "✕";
-    del.addEventListener("click", async (e) => { e.preventDefault(); await draftDelete(d.id); renderDrafts(); });
+    del.addEventListener("click", async (e) => { e.preventDefault(); if (confirm("이 초안을 삭제할까요?")) { await draftDelete(d.id); renderDrafts(true); updateInboxBadge(); } });
     row.appendChild(b); row.appendChild(del); box.appendChild(row);
   }
+  _draftOffset += data.drafts.length;
+  $("draftsMore").classList.toggle("hidden", _draftOffset >= data.total);
 }
-async function loadDraft(d) {
+async function loadDraft(id, title) {
+  let d; try { d = await apiJson("/api/drafts/" + id); } catch { return; }
   $("originalText").value = d.content || "";
   activeDraftId = d.id;
-  setStatus(`📥 초안 "${d.title}" 불러옴. '계정별 전체 생성'을 누르세요.`);
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  showView("new");
+  setStatus(`📥 초안 "${d.title || title}" 불러옴. '계정별 전체 생성'을 누르세요.`);
 }
 
 function setStatus(msg, isError = false) { const el = $("status"); el.textContent = msg; el.classList.remove("hidden"); el.classList.toggle("error", isError); }
@@ -197,8 +249,8 @@ function parseJson(raw) {
 }
 function tryParse(raw) { try { return parseJson(raw); } catch { return null; } }
 
-// ---------- 설정 모달 ----------
-function openOptions() {
+// ---------- 설정 (뷰) ----------
+function populateSettings() {
   // API 키: 존재여부 표시 + 입력란 비움(비우면 유지)
   $("hasAnthropic").textContent = settings.hasAnthropicKey ? "· 설정됨" : "· 미설정(.env 폴백)";
   $("hasKie").textContent = settings.hasKieKey ? "· 설정됨" : "· 미설정(.env 폴백)";
@@ -218,7 +270,6 @@ function openOptions() {
   $("optThumbStyle").value = settings.thumbnailStylePrompt || "";
   $("optAdEnabled").checked = !!settings.adEnabled;
   $("optAdCode").value = settings.adCode || "";
-  $("optionsDialog").showModal();
 }
 async function onSaveOptions() {
   const patch = {
@@ -233,7 +284,7 @@ async function onSaveOptions() {
     defaultTone: $("optTone").value.trim(), defaultAudience: $("optAudience").value.trim(), authorBio: $("optAuthorBio").value.trim(),
     thumbnailStylePrompt: $("optThumbStyle").value.trim(), adEnabled: $("optAdEnabled").checked, adCode: $("optAdCode").value.trim()
   };
-  try { await saveSettings(patch); settings = await getSettings(); try { config = await apiJson("/api/config"); } catch {} if (!config.kieEnabled) {} $("apiWarn").classList.toggle("hidden", !!config.kieEnabled || !!config.claudeEnabled); $("optionsDialog").close(); setStatus("✅ 설정 저장됨"); }
+  try { await saveSettings(patch); settings = await getSettings(); try { config = await apiJson("/api/config"); } catch {} $("apiWarn").classList.toggle("hidden", !!config.kieEnabled || !!config.claudeEnabled); populateSettings(); setStatus("✅ 설정 저장됨"); }
   catch (e) { setStatus("설정 저장 실패: " + e.message, true); }
 }
 
@@ -464,7 +515,7 @@ async function generateAll() {
   if (!config.kieEnabled && !config.claudeEnabled) { setStatus("생성 엔진(Claude/KIE) 키가 없습니다. 설정에서 입력하세요.", true); return; }
   if (!$("originalText").value.trim()) { setStatus("원본 글을 붙여넣거나 초안함에서 선택하세요.", true); return; }
   await refreshAccounts();
-  if (!accounts.length) { setStatus("먼저 '계정 관리'에서 목적지/쿠션 계정을 등록하세요.", true); $("accountsCard").open = true; return; }
+  if (!accounts.length) { setStatus("먼저 '계정 관리'에서 목적지/쿠션 계정을 등록하세요.", true); showView("accounts"); return; }
   const keyword = deriveTopic();
   $("genAll").disabled = true;
   try {
@@ -486,6 +537,7 @@ async function generateAll() {
     }
     if (activeDraftId) { await draftStatus(activeDraftId, "used"); renderDrafts(); }
     setStatus(`✅ ${accounts.length}개 계정 글 생성 완료. 아래 작업 목록에서 검수·발행하세요.`);
+    showView("board");
     await renderWorkList();
     if (workItems[0]) openWork(workItems[0].id);
   } catch (e) { setStatus("오류: " + e.message, true); }
