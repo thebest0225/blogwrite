@@ -234,9 +234,10 @@ export function buildHtml(article, opts = {}) {
     selfUrl: opts.selfUrl || "",
     _i: 0
   };
-  // 마우스오버 효과용 스타일(인라인은 :hover 불가라 style 블록 사용, 없어도 기본은 이쁨)
-  const hoverStyle = `<style>.awb-row{transition:all .15s ease;}.awb-row:hover{border-color:${accent}!important;box-shadow:0 6px 16px rgba(0,0,0,.13)!important;transform:translateY(-1px);}.awb-row:hover .awb-btn{filter:brightness(.9);}.awb-cta{transition:all .15s ease;}.awb-cta:hover{filter:brightness(.9);transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,.22)!important;}</style>`;
-  parts.push(hoverStyle);
+  // 주의: <style> 블록은 워드프레스(특히 멀티사이트)가 보안필터(kses)로 제거하면서
+  // 내부 CSS 텍스트가 본문에 노출되는 버그가 있음 → 발행 HTML엔 넣지 않는다.
+  // hover는 장식용일 뿐이고, 카드/버튼 기본 모양은 모두 인라인 스타일로 유지된다.
+  // 미리보기에서만 hover가 필요하면 buildPreviewDoc 쪽에서 스타일을 주입한다(발행 HTML에는 미포함).
   const adUnit = opts.adEnabled && opts.adCode
     ? `<div class="autowriter-ad" style="margin:1.6em 0;text-align:center;">${opts.adCode}</div>`
     : "";
@@ -304,8 +305,11 @@ export function buildHtml(article, opts = {}) {
 
 // 미리보기용 전체 문서 (iframe srcdoc)
 export function buildPreviewDoc(title, bodyHtml) {
+  // hover 효과는 발행 HTML엔 넣지 않고(워드프레스가 <style> 제거) 미리보기에서만 보여준다
   return `<!doctype html><html><head><meta charset="utf-8"/>
 <style>body{font-family:-apple-system,'Malgun Gothic',sans-serif;max-width:720px;margin:0 auto;padding:20px;color:#222;}
-h1{font-size:1.8em;line-height:1.3;margin:0 0 0.6em;}</style></head>
+h1{font-size:1.8em;line-height:1.3;margin:0 0 0.6em;}
+.awb-row{transition:all .15s ease;}.awb-row:hover{box-shadow:0 6px 16px rgba(0,0,0,.13)!important;transform:translateY(-1px);}
+.awb-cta{transition:all .15s ease;}.awb-cta:hover{filter:brightness(.92);transform:translateY(-1px);}</style></head>
 <body><h1>${esc(title)}</h1>${bodyHtml}</body></html>`;
 }

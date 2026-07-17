@@ -92,6 +92,10 @@
               <input type="text" id="draftKeyword" placeholder="주제/키워드 (예: 제주 3박4일 코스) — 트렌드를 눌러도 채워져요" style="flex:1;min-width:200px;" />
               <button class="primary" id="genDraft" style="width:auto;"><iconify-icon icon="solar:magic-stick-3-bold"></iconify-icon> AI 초안 생성</button>
             </div>
+            <div class="row" style="gap:8px;align-items:center;">
+              <button class="mini" id="copyDraftPrompt" type="button"><iconify-icon icon="solar:copy-linear"></iconify-icon> 클로드용 초안 프롬프트 복사</button>
+              <span class="muted">claude.ai에서 직접 만들어 MCP로 보낼 때 사용(키워드 자리에 주제만 넣으면 됨)</span>
+            </div>
           </div>
           <label class="field"><span id="originalLabel">원본 글 <span class="muted">— claude.ai 등에서 작성. 초안함에서 불러올 수도 있어요.</span></span>
             <textarea id="originalText" rows="9" placeholder="상세한 원본 글을 붙여넣으세요."></textarea>

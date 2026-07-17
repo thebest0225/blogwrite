@@ -75,6 +75,7 @@ async function init() {
   $("genAll").addEventListener("click", generateAll);
   $("genDraft").addEventListener("click", generateDraft);
   $("originalText").addEventListener("input", () => { activeDraftId = null; });  // 수동 편집/붙여넣기 = 새 초안
+  $("copyDraftPrompt").addEventListener("click", copyDraftPromptText);
   document.querySelectorAll(".mode-tab").forEach((b) => b.addEventListener("click", () => setGenMode(b.dataset.mode)));
   $("editToggle").addEventListener("click", toggleEdit);
   $("copyBtn").addEventListener("click", onCopy);
@@ -782,6 +783,13 @@ async function finalizeForAccount(acc, article, keyword, destUrl) {
 // 목적지/쿠션 글 생성 = 서드파티(KIE, 웹서치X). 초안(웹서치로 만든 원천자료)에서 정보 추출.
 function engineForMode() { return config.kieEnabled ? "kie" : "claude"; }
 
+// 클로드용 초안 프롬프트를 클립보드에 복사(서버 buildDraftPrompt와 항상 동일)
+async function copyDraftPromptText() {
+  const built = buildDraftPrompt({ keyword: "①여기에_키워드", reference: "", today: todayStr(), audience: settings.defaultAudience, tone: settings.defaultTone });
+  const text = `${built.system}\n\n${built.user}\n\n[MCP 전송] 완성된 초안을 submit_draft 도구로 보내줘. 첫 줄을 title, 나머지를 content 로.`;
+  try { await navigator.clipboard.writeText(text); setStatus("✅ 클로드용 초안 프롬프트를 복사했어요. claude.ai에 붙여넣고 '①여기에_키워드'만 바꾸세요."); }
+  catch { const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); setStatus("✅ 프롬프트 복사됨."); } catch { setStatus("복사 실패 — 브라우저 권한을 확인하세요.", true); } ta.remove(); }
+}
 // 초안(원천 자료) AI 생성 — Claude 공식 API + 웹서치. 결과를 원본 입력에 채운다.
 async function generateDraft() {
   if (!config.claudeEnabled) { setStatus("초안 AI 생성은 Claude 공식 API 키가 필요합니다. 설정에서 Anthropic 키를 입력하세요.", true); showView("settings"); return; }
