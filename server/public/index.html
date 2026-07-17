@@ -44,6 +44,7 @@
                 <button class="mini" id="wpDraftBtn">WP 초안</button>
                 <button class="mini primary-mini" id="wpPublishBtn"><iconify-icon icon="solar:upload-minimalistic-linear"></iconify-icon> WP 발행</button>
               </span>
+              <button class="mini primary-mini hidden" id="bloggerPublishBtn"><iconify-icon icon="solar:upload-minimalistic-linear"></iconify-icon> 블로거 발행</button>
               <button class="mini" id="markPublishedBtn"><iconify-icon icon="solar:check-read-linear"></iconify-icon> 발행 완료 표시</button>
             </div>
           </div>
@@ -169,6 +170,13 @@
           <div class="grid2" id="accWpCreds">
             <label class="field"><span>WP 사용자명</span><input type="text" id="accWpUser" autocomplete="off" /></label>
             <label class="field"><span>WP 앱 비밀번호</span><input type="password" id="accWpPw" autocomplete="off" /></label>
+          </div>
+          <div class="field" id="accBloggerConnect" style="display:none;">
+            <span>블로거 자동발행 (구글 연결)</span>
+            <div class="row" style="align-items:center;gap:10px;flex-wrap:wrap;">
+              <span id="accGoogleStatus" class="muted" style="flex:1;min-width:180px;">계정을 저장한 뒤 '구글 연결'을 눌러 인증하세요.</span>
+              <button type="button" class="mini primary-mini" id="accGoogleConnect"><iconify-icon icon="solar:login-3-bold"></iconify-icon> 구글 연결</button>
+            </div>
           </div>
           <p class="muted" id="accHint"></p>
           <div class="row" style="justify-content:flex-end;gap:8px;"><input type="hidden" id="accEditId" /><button class="mini" id="accCancel">초기화</button><button class="mini primary-mini" id="accSave">계정 저장</button></div>

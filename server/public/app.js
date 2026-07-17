@@ -86,6 +86,8 @@ async function init() {
   $("accPlatform").addEventListener("change", updateAccForm);
   $("accSave").addEventListener("click", onAccountSave);
   $("accCancel").addEventListener("click", resetAccForm);
+  $("accGoogleConnect").addEventListener("click", onGoogleConnect);
+  $("bloggerPublishBtn").addEventListener("click", bloggerPublish);
   $("schMode").addEventListener("change", updateSchForm);
   $("schSave").addEventListener("click", onScheduleSave);
   $("schCancel").addEventListener("click", resetSchForm);
@@ -97,6 +99,15 @@ async function init() {
   await refreshAccounts();
   updateInboxBadge();
   showView("board");
+  handleBloggerReturn();
+}
+function handleBloggerReturn() {
+  const p = new URLSearchParams(location.search);
+  const b = p.get("blogger");
+  if (!b) return;
+  if (b === "ok") { setStatus("✅ 블로거 구글 연결 완료! 이제 자동발행이 가능합니다."); showView("accounts"); }
+  else { setStatus("블로거 연결 실패: " + (p.get("msg") || "다시 시도해 주세요(구글 재동의 필요할 수 있음)."), true); showView("accounts"); }
+  history.replaceState(null, "", location.pathname);
 }
 let _dq = null;
 function showView(name) {
@@ -169,9 +180,10 @@ const ROLE_LABEL = { destination: "목적지", cushion: "쿠션", both: "겸용"
 function updateAccForm() {
   const p = $("accPlatform").value;
   $("accWpCreds").style.display = p === "wordpress" ? "" : "none";
+  $("accBloggerConnect").style.display = p === "blogger" ? "" : "none";
   $("accHint").textContent = p === "wordpress" ? "WP: 사이트 URL + 사용자명 + 응용프로그램 비밀번호(자동발행용)"
-    : p === "blogger" ? "블로거: 블로그 주소 입력. 자동발행은 구글 OAuth 연동 필요(추후). 지금은 HTML 복사용."
-    : "네이버: 블로그 주소 입력. 자동발행 불가 → HTML 복사용.";
+    : p === "blogger" ? "블로거: 블로그 주소 입력 → 저장 → '구글 연결'로 자동발행. (연결 전엔 HTML 복사식)"
+    : "네이버: 블로그 주소 입력. 자동발행 불가 → HTML 복사식.";
 }
 function resetAccForm() {
   $("accEditId").value = ""; $("accName").value = ""; $("accSite").value = "";
@@ -191,7 +203,8 @@ async function renderAccounts() {
     row.innerHTML = `<span class="acc-badge ${rc}">${ROLE_LABEL[a.role] || a.role}</span>`
       + `<span class="nm">${a.name || "(이름없음)"}</span>`
       + `<span class="acc-plat">${PLAT_LABEL[a.platform] || a.platform}</span>`
-      + (a.platform === "wordpress" ? `<span class="cred-chip ${a.has_creds ? "on" : "off"}"><iconify-icon icon="${a.has_creds ? "solar:lock-keyhole-bold" : "solar:lock-keyhole-unlocked-linear"}"></iconify-icon>${a.has_creds ? "인증 저장됨" : "인증 없음"}</span>` : "")
+      + (a.platform === "wordpress" ? `<span class="cred-chip ${a.has_creds ? "on" : "off"}"><iconify-icon icon="${a.has_creds ? "solar:lock-keyhole-bold" : "solar:lock-keyhole-unlocked-linear"}"></iconify-icon>${a.has_creds ? "인증 저장됨" : "인증 없음"}</span>`
+        : a.platform === "blogger" ? `<span class="cred-chip ${a.has_creds ? "on" : "off"}"><iconify-icon icon="${a.has_creds ? "solar:link-bold" : "solar:link-broken-linear"}"></iconify-icon>${a.has_creds ? "구글 연결됨" : "연결 필요"}</span>` : "")
       + (a.is_default ? '<span class="df">기본</span>' : "");
     const edit = document.createElement("button"); edit.className = "hist-del"; edit.textContent = "✎"; edit.title = "수정";
     edit.addEventListener("click", () => loadAccForEdit(a));
@@ -213,8 +226,21 @@ function loadAccForEdit(a) {
   pEl.placeholder = saved ? "•••••••• 저장됨 (변경할 때만)" : "";
   uEl.classList.toggle("saved", saved); pEl.classList.toggle("saved", saved);
   updateAccForm(); $("accSave").textContent = "수정 저장";
-  $("accHint").textContent += saved ? " · 자격증명이 저장돼 있습니다(비워두면 유지)" : " · 자격증명 비워두면 기존 유지";
+  if (a.platform === "blogger") {
+    $("accGoogleStatus").innerHTML = saved
+      ? '<span style="color:var(--ok-fg);font-weight:700;">✓ 구글 연결됨 — 자동발행 가능</span> (다시 누르면 재연결)'
+      : "아직 구글 연결 안 됨. '구글 연결'을 눌러 인증하세요.";
+    $("accGoogleConnect").innerHTML = `<iconify-icon icon="solar:login-3-bold"></iconify-icon> ${saved ? "재연결" : "구글 연결"}`;
+  } else {
+    $("accHint").textContent += saved ? " · 자격증명이 저장돼 있습니다(비워두면 유지)" : " · 자격증명 비워두면 기존 유지";
+  }
   window.scrollTo({ top: 0, behavior: "smooth" });
+}
+function onGoogleConnect() {
+  const id = $("accEditId").value;
+  if (!id) { setStatus("먼저 계정을 저장한 뒤 '구글 연결'을 누르세요.", true); return; }
+  if (!config.googleOAuth) { setStatus("서버에 구글 OAuth가 설정되지 않았습니다.", true); return; }
+  window.location.href = "/api/oauth/blogger/start?dest=" + encodeURIComponent(id);
 }
 async function onAccountSave() {
   const dst = {
@@ -694,6 +720,18 @@ async function chatArticle(built) {
   if (!article) throw new Error("JSON 파싱 실패: " + (content || "").slice(0, 120));
   return article;
 }
+// 생성된 work를 자동발행(WP=앱비번, 블로거=OAuth) → published 표시 + 자산 보관
+async function autoPublishWork(acc, wid, article, html, keyword) {
+  const isWp = acc.platform === "wordpress";
+  const res = isWp
+    ? await wpCreatePost({ title: article.title, content: html, status: "publish", destinationId: acc.id })
+    : await apiJson("/api/blogger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ destinationId: acc.id, title: article.title, content: html }) });
+  if (res && res.link) {
+    await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: wid, target: acc.platform, destination_id: acc.id, title: article.title || "", status: "published", published_url: res.link, publish_mode: "auto" }) }).catch(() => {});
+    try { await saveMyPost({ title: article.title, url: res.link, keyword }, (html || "").replace(/<[^>]+>/g, " ").slice(0, 4000)); } catch {}
+  }
+  return res;
+}
 async function generateAll() {
   if (!config.kieEnabled && !config.claudeEnabled) { setStatus("생성 엔진(Claude/KIE) 키가 없습니다. 설정에서 입력하세요.", true); return; }
   if (!$("originalText").value.trim()) { setStatus("원본 글을 붙여넣거나 초안함에서 선택하세요.", true); return; }
@@ -736,16 +774,14 @@ async function generateAll() {
       const wid = await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ draft_id: activeDraftId, target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated", role: genMode }) }).then((j) => j.id).catch(() => null);
       await storeAdd({ type: "article", title: article.title || "", keyword, platform: acc.platform });
       okCount++; done++;
-      // 자동발행: 목적지 모드 + WP + 자격증명 있음
-      if (settings.autoPublish && genMode === "destination" && acc.platform === "wordpress" && acc.has_creds && wid) {
-        progressStep(`[${acc.name}] 워드프레스 자동발행 중…`, 8 + Math.round((done / total) * 88));
+      // 자동발행: 자격증명/연결된 WP·블로거 (설정 ON 시)
+      const canAuto = settings.autoPublish && acc.has_creds && (acc.platform === "wordpress" || acc.platform === "blogger") && wid;
+      if (canAuto) {
+        progressStep(`[${acc.name}] ${PLAT_LABEL[acc.platform]} 자동발행 중…`, 8 + Math.round((done / total) * 88));
         try {
-          const res = await wpCreatePost({ title: article.title, content: html, status: "publish", destinationId: acc.id });
-          if (res.link) {
-            await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: wid, target: acc.platform, destination_id: acc.id, title: article.title || "", status: "published", published_url: res.link, publish_mode: "auto" }) }).catch(() => {});
-            try { await saveMyPost({ title: article.title, url: res.link, keyword }, (html || "").replace(/<[^>]+>/g, " ").slice(0, 4000)); } catch {}
-            progressLog(`${acc.name} — 자동발행 완료: ${res.link}`, "done");
-          } else { progressLog(`${acc.name} — 생성됨(발행 응답에 링크 없음, 작업보드 확인)`, "done"); }
+          const res = await autoPublishWork(acc, wid, article, html, keyword);
+          if (res && res.link) progressLog(`${acc.name} — 자동발행 완료: ${res.link}`, "done");
+          else progressLog(`${acc.name} — 생성됨(발행 링크 없음, 작업보드 확인)`, "done");
         } catch (e) { progressLog(`${acc.name} — 생성됨(자동발행 실패: ${e.message})`, "error"); }
       } else {
         progressLog(`${acc.name} — ${(article.title || "").slice(0, 40) || "생성됨"}`, "done");
@@ -754,7 +790,7 @@ async function generateAll() {
     }
     if (activeDraftId) { await draftStatus(activeDraftId, "used"); renderDrafts(); }
     if (okCount) {
-      const autoMsg = settings.autoPublish && genMode === "destination" ? " (WP 자동발행 시도됨)" : "";
+      const autoMsg = settings.autoPublish ? " (WP·블로거 자동발행 시도됨)" : "";
       progressDone(true, `${okCount}/${total}개 ${modeLabel} 글 생성 완료${autoMsg}`);
       setStatus(`✅ ${okCount}개 ${modeLabel} 글 생성 완료${autoMsg}. 작업보드/발행 기록에서 확인하세요.`);
     } else {
@@ -831,6 +867,7 @@ function renderCur() {
   $("metaLine").textContent = `[${cur.acc.name || PLAT_LABEL[cur.target] || cur.target}] ${cur.article.title || ""}` + (cur.resolvedType ? ` · 유형:${cur.resolvedType}` : "") + `\n메타: ${cur.article.metaDescription || "-"}`;
   $("preview").srcdoc = buildPreviewDoc(cur.article.title || "", cur.html);
   $("wpActions").classList.toggle("hidden", cur.target !== "wordpress");
+  $("bloggerPublishBtn").classList.toggle("hidden", !(cur.target === "blogger" && cur.acc.has_creds));
   $("markPublishedBtn").classList.toggle("hidden", cur.target === "wordpress");
   $("mainUrlRow").classList.toggle("hidden", !isDestRole(cur.acc));
   renderImageEditors();
@@ -984,4 +1021,18 @@ async function wpPublish(status) {
     }
     setStatus(`✅ ${label} 완료: ${res.link || ("글 #" + res.id)}${status === "publish" && isDestRole(cur?.acc || {}) ? " · 목적지로 설정됨" : ""}`);
   } catch (e) { setStatus(`${label} 실패: ` + e.message, true); }
+}
+async function bloggerPublish() {
+  if (!cur?.html) return;
+  if (cur.target !== "blogger") return;
+  try {
+    setStatus(`[${cur.acc.name || "블로거"}] 블로거 발행 중…`);
+    const res = await apiJson("/api/blogger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ destinationId: cur.acc.id, title: cur.article.title, content: cur.html }) });
+    if (res.link) {
+      try { await saveMyPost({ title: cur.article.title, url: res.link, keyword: cur.keyword }, (cur.html || "").replace(/<[^>]+>/g, " ").slice(0, 4000)); } catch {}
+      await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: cur.id, target: cur.target, destination_id: cur.acc.id, title: cur.article.title || "", status: "published", published_url: res.link, publish_mode: "auto" }) }).catch(() => {});
+      setStatus(`✅ 블로거 발행 완료: ${res.link}`);
+      cur = null; $("workDetail").style.display = "none"; renderWorkList();
+    }
+  } catch (e) { setStatus("블로거 발행 실패: " + e.message + " · 계정 관리에서 '구글 연결'을 확인하세요.", true); }
 }

@@ -279,6 +279,65 @@ app.post("/api/wp", async (req, res) => {
   } catch (e) { res.status(500).json({ error: String(e) }); }
 });
 
+// ---- 블로거 OAuth (Google) + 자동발행 ----
+const GOOGLE_ID = process.env.GOOGLE_CLIENT_ID, GOOGLE_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const GOOGLE_REDIRECT = process.env.GOOGLE_REDIRECT || (CANONICAL + "/api/oauth/blogger/callback");
+const normUrl = (u) => (u || "").replace(/^https?:\/\//, "").replace(/\/+$/, "").toLowerCase();
+
+app.get("/api/oauth/blogger/start", (req, res) => {
+  if (!GOOGLE_ID) return res.status(400).send("Google OAuth 미설정(.env 확인)");
+  const url = "https://accounts.google.com/o/oauth2/v2/auth?" + new URLSearchParams({
+    client_id: GOOGLE_ID, redirect_uri: GOOGLE_REDIRECT, response_type: "code",
+    scope: "https://www.googleapis.com/auth/blogger", access_type: "offline", prompt: "consent",
+    state: String(req.query.dest || "")
+  });
+  res.redirect(url);
+});
+
+app.get("/api/oauth/blogger/callback", async (req, res) => {
+  const code = req.query.code, destId = req.query.state;
+  if (!code) return res.redirect(CANONICAL + "/?blogger=error#accounts");
+  try {
+    const tr = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code, client_id: GOOGLE_ID, client_secret: GOOGLE_SECRET, redirect_uri: GOOGLE_REDIRECT, grant_type: "authorization_code" }) });
+    const tj = await tr.json();
+    if (!tr.ok || !tj.refresh_token) throw new Error(tj.error_description || "토큰 교환 실패(재동의 필요할 수 있음)");
+    const access = tj.access_token;
+    const dest = destId ? DB.getDestination(req.userId, destId) : null;
+    let blogId = "", blogUrl = "";
+    try {
+      const br = await fetch("https://www.googleapis.com/blogger/v3/users/self/blogs", { headers: { Authorization: "Bearer " + access } });
+      const bj = await br.json(); const blogs = bj.items || [];
+      if (dest && dest.site_url) { const m = blogs.find((b) => normUrl(b.url) === normUrl(dest.site_url)); if (m) { blogId = m.id; blogUrl = m.url; } }
+      if (!blogId && blogs[0]) { blogId = blogs[0].id; blogUrl = blogs[0].url; }
+    } catch {}
+    if (dest) {
+      DB.upsertDestination(req.userId, { id: dest.id, name: dest.name, platform: dest.platform, role: dest.role, site_url: dest.site_url || blogUrl, is_default: dest.is_default, creds: { refreshToken: tj.refresh_token, blogId, blogUrl } });
+    }
+    res.redirect(CANONICAL + "/?blogger=ok#accounts");
+  } catch (e) {
+    res.redirect(CANONICAL + "/?blogger=error&msg=" + encodeURIComponent(String(e.message || e).slice(0, 120)) + "#accounts");
+  }
+});
+
+async function bloggerAccessToken(refreshToken) {
+  const r = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ refresh_token: refreshToken, client_id: GOOGLE_ID, client_secret: GOOGLE_SECRET, grant_type: "refresh_token" }) });
+  const j = await r.json(); if (!r.ok || !j.access_token) throw new Error(j.error_description || "액세스 토큰 갱신 실패");
+  return j.access_token;
+}
+app.post("/api/blogger", async (req, res) => {
+  const { destinationId, title, content, isDraft } = req.body || {};
+  const dest = destinationId ? DB.getDestination(req.userId, destinationId) : null;
+  if (!dest || dest.platform !== "blogger") return res.status(400).json({ error: "블로거 계정이 아닙니다." });
+  const rt = dest.creds?.refreshToken, blogId = dest.creds?.blogId;
+  if (!rt || !blogId) return res.status(400).json({ error: "이 블로거 계정은 아직 '구글 연결'이 안 됐습니다." });
+  try {
+    const access = await bloggerAccessToken(rt);
+    const r = await fetch(`https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts/${isDraft ? "?isDraft=true" : ""}`, { method: "POST", headers: { Authorization: "Bearer " + access, "Content-Type": "application/json" }, body: JSON.stringify({ title, content }) });
+    const j = await r.json(); if (!r.ok) throw new Error(j.error?.message || r.status);
+    res.json({ id: j.id, link: j.url });
+  } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+});
+
 // ---- 발행 자산(보관함) — /api/store 호환 shim (assets) ----
 app.get("/api/store", (req, res) => res.json({ records: DB.listAssets(req.userId).map((a) => ({ type: "post", url: a.url, title: a.title, keyword: a.keyword, date: a.date })) }));
 app.post("/api/store", (req, res) => { const b = req.body || {}; if (b.type === "post" && b.url) DB.addAsset(req.userId, { url: b.url, title: b.title, keyword: b.keyword, excerpt: b.body }); res.json({ ok: true }); });
@@ -326,6 +385,7 @@ app.get("/api/config", (req, res) => {
     claudeEnabled: !!s.anthropicKey || !!ANTHROPIC_KEY,
     wpEnabled: DB.listDestinations(req.userId).some((d) => d.platform === "wordpress") || !!WP_SITE,
     naverEnabled: !!s.naverClientId || !!NAVER_ID,
+    googleOAuth: !!GOOGLE_ID,
     defaultEngine: s.genEngine || DEFAULT_ENGINE,
     newDrafts: DB.countNewDrafts(req.userId)
   });
