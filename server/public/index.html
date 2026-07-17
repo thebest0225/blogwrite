@@ -105,27 +105,21 @@
       </div>
     </details>
 
-    <!-- 2) 순차 생성 -->
+    <!-- 2) 생성 (등록된 계정마다 각각 다른 글) -->
     <section class="card">
-      <div class="card-title">2. 순차 생성</div>
-      <p class="muted" style="margin:.2em 0 .8em;">권장 순서: ① 워드프레스(목적지) 생성 → 발행 → 주소 저장(자동) → ② 블로거 · ③ 네이버 쿠션(그 주소로 자동 유입)</p>
-      <div class="gen-btns">
-        <button class="genbtn" id="genWp"><b>① 워드프레스</b><span>최종 목적지 · 가장 깊이</span></button>
-        <button class="genbtn" id="genBlogger"><b>② 블로거</b><span>쿠션 · 링크 여러 개</span></button>
-        <button class="genbtn" id="genNaver"><b>③ 네이버</b><span>쿠션 · 목적지1+연관1</span></button>
-      </div>
+      <div class="card-title">2. 생성</div>
+      <p class="muted" style="margin:.2em 0 .8em;">원본(또는 초안함 선택)으로 <b id="genAccCount">0</b>개 계정에 <b>각각 다른 글</b>을 생성합니다. (목적지→쿠션 순, 같은 플랫폼도 서로 다르게)</p>
+      <button class="primary" id="genAll">✨ 계정별 전체 생성</button>
       <div id="status" class="status hidden" style="margin-top:10px;"></div>
     </section>
 
-    <!-- 3) 결과 (탭으로 3종 확인) -->
+    <!-- 3) 작업 목록 (칸반) + 상세 -->
     <section class="card" id="resultCard" style="display:none;">
-      <div class="restabs">
-        <button class="restab" data-t="wp" id="rt-wp">워드프레스(목적지)</button>
-        <button class="restab" data-t="blogger" id="rt-blogger">블로거(쿠션)</button>
-        <button class="restab" data-t="naver" id="rt-naver">네이버(쿠션)</button>
-      </div>
+      <div class="card-title">3. 작업 목록 <span class="muted">— 계정별 결과. 발행하면 목록에서 사라집니다</span></div>
+      <div id="workList" class="acc-list"></div>
 
-      <!-- 워드프레스(목적지): 발행 URL 저장 -->
+      <div id="workDetail" style="display:none;margin-top:10px;border-top:1px solid var(--line);padding-top:12px;">
+      <!-- 목적지(WP) 발행 URL 저장 -->
       <div class="mainurl-row hidden" id="mainUrlRow">
         <span class="muted">발행된 워드프레스 주소를 저장하면 블로거·네이버 쿠션이 이 글로 유입됩니다 → (WP 발행 버튼 쓰면 자동)</span>
         <input type="text" id="mainUrlInput" placeholder="https://wp.mangois.love/발행된-글-주소" />
@@ -149,6 +143,7 @@
         <summary>🖌️ 이미지 수정 / 다시 생성</summary>
         <div id="imgEditList" class="imgedit-list"></div>
       </details>
+      </div><!-- /workDetail -->
     </section>
   </main>
 
