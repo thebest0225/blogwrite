@@ -47,6 +47,8 @@ CREATE INDEX IF NOT EXISTS idx_sched_user ON schedules(user_id);
 `);
 // 계정 역할(목적지/쿠션/겸용) 컬럼 (기존 테이블에도 추가)
 try { db.exec("ALTER TABLE destinations ADD COLUMN role TEXT DEFAULT 'destination'"); } catch {}
+// 발행 방식(auto=자동발행 / manual=HTML 수동) 컬럼
+try { db.exec("ALTER TABLE work_items ADD COLUMN publish_mode TEXT"); } catch {}
 
 // ---- 암호화 (API 키·발행 자격) ----
 const SECRET = crypto.createHash("sha256").update(process.env.DATA_SECRET || "blogwrite-default-secret").digest();
@@ -98,7 +100,8 @@ export function saveSettings(userId, patch) {
 
 // ---- 계정(목적지/쿠션) : 다수, 플랫폼별, 역할별 ----
 export function listDestinations(userId) {
-  return db.prepare("SELECT id,name,platform,role,site_url,is_default FROM destinations WHERE user_id=? ORDER BY role, is_default DESC, created_at").all(uid(userId));
+  const rows = db.prepare("SELECT id,name,platform,role,site_url,is_default,creds FROM destinations WHERE user_id=? ORDER BY role, is_default DESC, created_at").all(uid(userId));
+  return rows.map((d) => { const has = !!(d.creds && d.creds.length); delete d.creds; return { ...d, has_creds: has }; });
 }
 export function getDestination(userId, id) {
   const d = db.prepare("SELECT * FROM destinations WHERE user_id=? AND id=?").get(uid(userId), id);
@@ -124,7 +127,8 @@ export function upsertDestination(userId, dst) {
 export function deleteDestination(userId, id) { db.prepare("DELETE FROM destinations WHERE user_id=? AND id=?").run(uid(userId), id); return listDestinations(userId); }
 // 생성 대상 계정 목록 (목적지 우선, 그다음 쿠션) — 계정별로 각각 다른 글 생성
 export function accountsForGeneration(userId) {
-  return db.prepare("SELECT id,name,platform,role,site_url FROM destinations WHERE user_id=? ORDER BY CASE role WHEN 'destination' THEN 0 WHEN 'both' THEN 1 ELSE 2 END, created_at").all(uid(userId));
+  const rows = db.prepare("SELECT id,name,platform,role,site_url,creds FROM destinations WHERE user_id=? ORDER BY CASE role WHEN 'destination' THEN 0 WHEN 'both' THEN 1 ELSE 2 END, created_at").all(uid(userId));
+  return rows.map((d) => { const has = !!(d.creds && d.creds.length); delete d.creds; return { ...d, has_creds: has }; });
 }
 
 // ---- 초안함 ----
@@ -169,8 +173,8 @@ export function searchAssets(userId, query) {
 // ---- 작업 항목(칸반) ----
 export function listWorkItems(userId, status) {
   return status
-    ? db.prepare("SELECT id,draft_id,target,destination_id,title,status,published_url,updated_at FROM work_items WHERE user_id=? AND status=? ORDER BY updated_at DESC").all(uid(userId), status)
-    : db.prepare("SELECT id,draft_id,target,destination_id,title,status,published_url,updated_at FROM work_items WHERE user_id=? AND status!='published' ORDER BY updated_at DESC").all(uid(userId));
+    ? db.prepare("SELECT id,draft_id,target,destination_id,title,status,published_url,publish_mode,updated_at FROM work_items WHERE user_id=? AND status=? ORDER BY updated_at DESC").all(uid(userId), status)
+    : db.prepare("SELECT id,draft_id,target,destination_id,title,status,published_url,publish_mode,updated_at FROM work_items WHERE user_id=? AND status!='published' ORDER BY updated_at DESC").all(uid(userId));
 }
 export function getWorkItem(userId, id) {
   const w = db.prepare("SELECT * FROM work_items WHERE user_id=? AND id=?").get(uid(userId), id);
@@ -182,11 +186,11 @@ export function upsertWorkItem(userId, w) {
   const ex = db.prepare("SELECT id FROM work_items WHERE user_id=? AND id=?").get(uid(userId), id);
   const aj = w.article ? JSON.stringify(w.article) : (w.article_json || null);
   if (ex) {
-    db.prepare("UPDATE work_items SET target=?,destination_id=?,title=?,article_json=COALESCE(?,article_json),html=COALESCE(?,html),status=?,published_url=COALESCE(?,published_url),updated_at=? WHERE user_id=? AND id=?")
-      .run(w.target, w.destination_id || null, w.title || "", aj, w.html ?? null, w.status || "generated", w.published_url || null, now(), uid(userId), id);
+    db.prepare("UPDATE work_items SET target=?,destination_id=?,title=?,article_json=COALESCE(?,article_json),html=COALESCE(?,html),status=?,published_url=COALESCE(?,published_url),publish_mode=COALESCE(?,publish_mode),updated_at=? WHERE user_id=? AND id=?")
+      .run(w.target, w.destination_id || null, w.title || "", aj, w.html ?? null, w.status || "generated", w.published_url || null, w.publish_mode || null, now(), uid(userId), id);
   } else {
-    db.prepare("INSERT INTO work_items(id,user_id,draft_id,target,destination_id,title,article_json,html,status,published_url,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
-      .run(id, uid(userId), w.draft_id || null, w.target, w.destination_id || null, w.title || "", aj, w.html || "", w.status || "generated", w.published_url || null, now(), now());
+    db.prepare("INSERT INTO work_items(id,user_id,draft_id,target,destination_id,title,article_json,html,status,published_url,publish_mode,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      .run(id, uid(userId), w.draft_id || null, w.target, w.destination_id || null, w.title || "", aj, w.html || "", w.status || "generated", w.published_url || null, w.publish_mode || null, now(), now());
   }
   return id;
 }

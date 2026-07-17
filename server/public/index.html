@@ -19,6 +19,7 @@
         <button class="nav-item" data-view="inbox"><iconify-icon class="ni" icon="solar:inbox-line-bold-duotone"></iconify-icon> 초안함 <span class="nav-badge hidden" id="inboxBadge">0</span></button>
         <button class="nav-item" data-view="accounts"><iconify-icon class="ni" icon="solar:key-minimalistic-square-bold-duotone"></iconify-icon> 계정 관리</button>
         <button class="nav-item" data-view="schedule"><iconify-icon class="ni" icon="solar:alarm-bold-duotone"></iconify-icon> 자동화·예약</button>
+        <button class="nav-item" data-view="history"><iconify-icon class="ni" icon="solar:checklist-minimalistic-bold-duotone"></iconify-icon> 발행 기록</button>
         <button class="nav-item" data-view="assets"><iconify-icon class="ni" icon="solar:link-round-angle-bold-duotone"></iconify-icon> 발행 자산</button>
         <button class="nav-item" data-view="settings"><iconify-icon class="ni" icon="solar:settings-bold-duotone"></iconify-icon> 설정</button>
       </nav>
@@ -174,6 +175,15 @@
         </div>
       </section>
 
+      <!-- 발행 기록 (보관함) -->
+      <section class="view hidden" data-view="history">
+        <div class="view-head"><h2>발행 기록</h2><span class="muted" id="historyCount">— 발행된 모든 글을 보관·검색합니다</span><button class="mini" id="historyRefresh" style="margin-left:auto;">새로고침</button></div>
+        <div class="card">
+          <div class="row"><input type="text" id="historySearch" placeholder="제목·계정 검색" /></div>
+          <div id="historyList" class="acc-list" style="margin-top:10px;"></div>
+        </div>
+      </section>
+
       <!-- 발행 자산 -->
       <section class="view hidden" data-view="assets">
         <div class="view-head"><h2>발행 자산</h2><span class="muted" id="myPostsCount">— 발행 글이 연관 링크로 자동 활용됩니다</span></div>
@@ -209,6 +219,8 @@
             <label class="field"><span>링크 처리</span><select id="optLinkMode"><option value="search">검색결과로 안전</option><option value="model">모델 URL</option></select></label>
             <label class="field"><span>오버레이 액센트</span><input type="color" id="optAccent" value="#ff2d55" /></label>
           </div>
+          <div class="opt-sec"><iconify-icon icon="solar:rocket-2-bold-duotone"></iconify-icon> 자동발행</div>
+          <label class="check"><input type="checkbox" id="optAutoPublish" /><span>초안이 준비되면 <b>목적지 글을 자동 생성 + 워드프레스 자동발행</b> (부재중용). 블로거·네이버는 자동발행 대상이 아니면 작업보드에 남아 수동 발행.</span></label>
           <label class="field"><span>내 블로그/사이트 (기본 목적지)</span><input type="text" id="optMyBlog" /></label>
           <div class="grid2">
             <label class="field"><span>기본 톤</span><input type="text" id="optTone" /></label>

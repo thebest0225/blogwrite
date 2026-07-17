@@ -204,6 +204,19 @@ select { appearance: none; background-image: url("data:image/svg+xml;utf8,<svg x
 .trend-newslink:hover { border-color: var(--accent); color: var(--accent); background: #fff; text-decoration: none; }
 .trend-newslink iconify-icon { font-size: 13px; }
 
+/* ===== 발행 방식 배지 ===== */
+.pubm { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; background: var(--surface-2); color: var(--muted); }
+.pubm.auto { background: var(--ok-bg); color: var(--ok-fg); }
+.pubm.manual { background: var(--accent-soft); color: var(--accent-dark); }
+
+/* ===== 저장된 비밀값 표시 ===== */
+input.saved { border-color: #a7f3d0; background: #f0fdf9; }
+input.saved::placeholder { color: #10b981; font-weight: 600; opacity: 1; }
+.cred-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.cred-chip iconify-icon { font-size: 13px; }
+.cred-chip.on { background: var(--ok-bg); color: var(--ok-fg); }
+.cred-chip.off { background: #fff1f0; color: #e11d48; }
+
 /* ===== 계정 선택 픽커 ===== */
 .gen-accpick-wrap { display: flex; flex-direction: column; gap: 8px; }
 .gen-accpick-head { font-size: 13px; color: var(--ink-2); }
