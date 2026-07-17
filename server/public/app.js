@@ -1045,7 +1045,7 @@ async function generateAll() {
       }
       progressBar(8 + Math.round((done / total) * 88));
     }
-    if (activeDraftId) { await draftStatus(activeDraftId, "used"); renderDrafts(); }
+    if (okCount && activeDraftId) { await draftStatus(activeDraftId, "used"); renderDrafts(); }   // 성공했을 때만 '사용됨' 처리
     if (genAborted) {
       progressDone(false, `중단됨 — ${okCount}/${total}개까지 생성 완료(작업보드에 저장됨)`);
       setStatus(`생성을 중단했습니다. ${okCount}개는 저장되었습니다.`);
