@@ -291,6 +291,35 @@ app.post("/api/wp", async (req, res) => {
   } catch (e) { res.status(500).json({ error: "WP 발행 오류: " + String(e.message || e) }); }
 });
 
+// ---- 초안(웹서치) 백그라운드 생성: 긴 요청이 Cloudflare 터널 타임아웃 나지 않게 job+폴링 ----
+const draftJobs = new Map();
+app.post("/api/draft/start", (req, res) => {
+  const aKey = DB.getSecret(req.userId, "anthropicKey") || ANTHROPIC_KEY;
+  if (!aKey) return res.status(400).json({ error: "Anthropic 키가 필요합니다(설정에서 입력)." });
+  const { keyword, reference } = req.body || {};
+  if (!keyword || !String(keyword).trim()) return res.status(400).json({ error: "키워드가 필요합니다." });
+  const id = "dj_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  draftJobs.set(id, { status: "pending", ts: Date.now(), userId: req.userId });
+  (async () => {
+    try {
+      const st = DB.getSettingsRaw(req.userId);
+      const built = buildDraftPrompt({ keyword: String(keyword).trim(), reference: reference || "", today: new Date().toISOString().slice(0, 10), audience: st.defaultAudience, tone: st.defaultTone });
+      const text = await anthropicChat({ system: built.system, user: built.user, maxTokens: 16000, apiKey: aKey });
+      const job = draftJobs.get(id); if (job) { job.status = "done"; job.text = text; job.ts = Date.now(); }
+    } catch (e) {
+      const job = draftJobs.get(id); if (job) { job.status = "error"; job.error = String(e.message || e).slice(0, 200); job.ts = Date.now(); }
+    }
+  })();
+  res.json({ jobId: id });
+});
+app.get("/api/draft/status", (req, res) => {
+  const job = draftJobs.get(req.query.id);
+  if (!job || job.userId !== req.userId) return res.status(404).json({ error: "작업을 찾을 수 없음" });
+  const out = { status: job.status, text: job.text || "", error: job.error || "" };
+  if (job.status !== "pending" && Date.now() - job.ts > 300000) draftJobs.delete(req.query.id);
+  res.json(out);
+});
+
 // ---- 블로거 OAuth (Google) + 자동발행 ----
 const GOOGLE_ID = process.env.GOOGLE_CLIENT_ID, GOOGLE_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const GOOGLE_REDIRECT = process.env.GOOGLE_REDIRECT || (CANONICAL + "/api/oauth/blogger/callback");

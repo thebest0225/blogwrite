@@ -26,11 +26,16 @@ const DEFAULTS = {
 };
 
 // ---------- API ----------
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function apiJson(url, opts) {
   const r = await fetch(url, opts);
   if (r.status === 401) { let j = {}; try { j = await r.json(); } catch {} location.href = j.login || "https://mangois.love/"; throw new Error("로그인 필요"); }
   const t = await r.text();
-  let j; try { j = JSON.parse(t); } catch { throw new Error(t.slice(0, 200)); }
+  // Cloudflare/게이트웨이 HTML 방어 — 원시 HTML을 에러로 노출하지 않음
+  if (/^\s*<(?:!doctype|html)|no-js ie6 oldie/i.test(t)) {
+    throw new Error(r.status === 504 || r.status === 524 ? "서버 응답 시간 초과(잠시 후 다시 시도해 주세요)." : "게이트웨이 오류(잠시 후 다시 시도해 주세요).");
+  }
+  let j; try { j = JSON.parse(t); } catch { throw new Error(t.slice(0, 150)); }
   if (!r.ok || j.error) throw new Error(j.error || `HTTP ${r.status}`);
   return j;
 }
@@ -69,6 +74,7 @@ async function init() {
   $("goAccounts")?.addEventListener("click", (e) => { e.preventDefault(); showView("accounts"); });
   $("genAll").addEventListener("click", generateAll);
   $("genDraft").addEventListener("click", generateDraft);
+  $("originalText").addEventListener("input", () => { activeDraftId = null; });  // 수동 편집/붙여넣기 = 새 초안
   document.querySelectorAll(".mode-tab").forEach((b) => b.addEventListener("click", () => setGenMode(b.dataset.mode)));
   $("editToggle").addEventListener("click", toggleEdit);
   $("copyBtn").addEventListener("click", onCopy);
@@ -787,23 +793,33 @@ async function generateDraft() {
   openProgress("AI 초안 생성 (웹서치)");
   progressLog(`엔진: Claude 공식 API · 웹서치 ON · 주제: ${kw}`, "done");
   try {
-    progressStep("웹 검색하며 초안 작성 중… (30초~1분 소요)", 20);
     // 트렌드에서 온 키워드면 뉴스 맥락을 근거로 넘겨 트렌드에 맞는 초안·연관키워드가 나오게
     let trendRef = "";
     if (selectedTrend && selectedTrend.title === kw) {
       trendRef = `[지금 뜨는 트렌드 맥락 — 이 흐름을 반영해 최신 이슈 각도로 써라]\n- 트렌드 키워드: ${selectedTrend.title}${selectedTrend.traffic ? ` (검색량 ${selectedTrend.traffic})` : ""}\n${selectedTrend.newsTitle ? `- 관련 뉴스: ${selectedTrend.newsTitle}${selectedTrend.newsSource ? " / " + selectedTrend.newsSource : ""}\n` : ""}- 지금 이 주제를 검색하는 사람들이 실제로 궁금해할 각도(배경·인물·쟁점·전망)와 연관 검색어를 잘 잡아라.`;
     }
-    const built = buildDraftPrompt({ keyword: kw, reference: trendRef, today: todayStr(), audience: settings.defaultAudience, tone: settings.defaultTone });
-    const text = await chatComplete({ engine: "claude", system: built.system, user: built.user, maxTokens: 16000 });
-    if (!text || !text.trim()) throw new Error("빈 응답");
-    progressBar(85);
+    // 백그라운드 작업으로 시작(웹서치는 오래 걸려 동기 요청은 터널 타임아웃 발생) → 폴링
+    progressStep("초안 작업 시작…", 8);
+    const { jobId } = await apiJson("/api/draft/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keyword: kw, reference: trendRef }) });
+    let text = "", t0 = Date.now(), pct = 12;
+    for (;;) {
+      if (genAborted) throw new Error("__abort__");
+      await sleep(3000);
+      let st; try { st = await apiJson("/api/draft/status?id=" + encodeURIComponent(jobId)); } catch (e) { continue; }
+      const secs = Math.round((Date.now() - t0) / 1000);
+      pct = Math.min(90, pct + 3); progressStep(`웹 검색하며 초안 작성 중… (${secs}초 경과, 최대 2~3분)`, pct);
+      if (st.status === "done") { text = st.text || ""; break; }
+      if (st.status === "error") throw new Error(st.error || "초안 생성 실패");
+    }
+    if (!text.trim()) throw new Error("빈 응답");
+    progressBar(94);
     $("originalText").value = text.trim();
     // 초안도 초안함에 보관
-    try { await apiJson("/api/drafts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: (text.split(/\n/)[0] || kw).slice(0, 80), content: text.trim(), keyword: kw, source: "ai-draft" }) }); updateInboxBadge(); } catch {}
+    try { const j = await apiJson("/api/drafts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: (text.split(/\n/)[0] || kw).slice(0, 80), content: text.trim(), keyword: kw, source: "ai-draft" }) }); activeDraftId = j.draft?.id || activeDraftId; updateInboxBadge(); } catch {}
     progressDone(true, "초안 생성 완료 — 검토 후 ② 목적지 탭으로 이동하세요.");
     setStatus(`✅ "${kw}" 초안 생성 완료(초안함에도 저장). 검토 후 ② 목적지 만들기 탭으로 이동하세요.`);
   } catch (e) {
-    if (genAborted || e.name === "AbortError") { progressDone(false, "중단되었습니다."); setStatus("초안 생성을 중단했습니다."); }
+    if (genAborted || e.name === "AbortError" || e.message === "__abort__") { progressDone(false, "중단되었습니다."); setStatus("초안 생성을 중단했습니다."); }
     else { progressDone(false, "초안 생성 실패: " + e.message); setStatus("초안 생성 실패: " + e.message, true); }
   } finally { $("genDraft").disabled = false; $("genAll").disabled = false; }
 }
@@ -845,6 +861,10 @@ async function generateAll() {
     if (asset) reference = `[유입 목적지 글: ${asset.title || ""}]\n${asset.excerpt || asset.summary || ""}`.trim();
   }
   const keyword = deriveTopic();
+  // 붙여넣기/직접작성 원본도 초안함에 축적(로드된 초안이 아니면)
+  if (!activeDraftId && $("originalText").value.trim()) {
+    try { const j = await apiJson("/api/drafts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: (deriveTopic() || keyword || "붙여넣은 초안").slice(0, 80), content: $("originalText").value.trim(), keyword, source: "pasted" }) }); activeDraftId = j.draft?.id || null; updateInboxBadge(); } catch {}
+  }
   $("genAll").disabled = true;
   const modeLabel = genMode === "destination" ? "목적지" : "쿠션";
   openProgress(`${modeLabel} 글 생성`);
