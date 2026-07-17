@@ -42,10 +42,13 @@ async function apiJson(url, opts) {
 // 긴 생성은 백그라운드 잡+폴링(터널 타임아웃 회피). 중단(genAborted) 지원.
 async function chatComplete({ system, user, maxTokens, model, engine }) {
   const { jobId } = await apiJson("/api/chat/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system, user, maxTokens, model, engine: engine || settings?.genEngine }) });
+  let fails = 0;
   for (;;) {
     if (genAborted) throw new Error("__abort__");
     await sleep(2500);
-    let st; try { st = await apiJson("/api/chat/status?id=" + encodeURIComponent(jobId)); } catch (e) { continue; }
+    let st;
+    try { st = await apiJson("/api/chat/status?id=" + encodeURIComponent(jobId)); fails = 0; }
+    catch (e) { if (/작업/.test(e.message)) throw new Error("작업이 유실됐어요(서버 재시작 등). 다시 생성해 주세요."); if (++fails > 8) throw new Error("서버 응답이 없어 중단했어요. 다시 시도해 주세요."); continue; }
     if (st.status === "done") return st.content;
     if (st.status === "error") throw new Error(st.error || "AI 응답 실패");
   }
@@ -936,11 +939,13 @@ async function generateDraft() {
     // 백그라운드 작업으로 시작(웹서치는 오래 걸려 동기 요청은 터널 타임아웃 발생) → 폴링
     progressStep("초안 작업 시작…", 8);
     const { jobId } = await apiJson("/api/draft/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keyword: kw, reference: trendRef }) });
-    let text = "", t0 = Date.now(), pct = 12;
+    let text = "", t0 = Date.now(), pct = 12, dfails = 0;
     for (;;) {
       if (genAborted) throw new Error("__abort__");
       await sleep(3000);
-      let st; try { st = await apiJson("/api/draft/status?id=" + encodeURIComponent(jobId)); } catch (e) { continue; }
+      let st;
+      try { st = await apiJson("/api/draft/status?id=" + encodeURIComponent(jobId)); dfails = 0; }
+      catch (e) { if (/작업/.test(e.message)) throw new Error("작업이 유실됐어요(서버 재시작 등). 다시 생성해 주세요."); if (++dfails > 8) throw new Error("서버 응답이 없어 중단했어요. 다시 시도해 주세요."); continue; }
       const secs = Math.round((Date.now() - t0) / 1000);
       pct = Math.min(90, pct + 3); progressStep(`웹 검색하며 초안 작성 중… (${secs}초 경과, 최대 2~3분)`, pct);
       if (st.status === "done") { text = st.text || ""; break; }
