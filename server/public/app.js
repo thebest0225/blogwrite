@@ -1,5 +1,5 @@
 // 블로그 오토라이터 — 웹앱 프론트 (파이프라인: 원본 1개 → 블로거·네이버·워드프레스 3종)
-import { buildBloggerMain, buildCushionPrompt } from "./lib/prompts.js";
+import { buildBloggerMain, buildCushionPrompt, buildDraftPrompt } from "./lib/prompts.js";
 import { buildHtml, buildPreviewDoc } from "./lib/html-builder.js";
 import { composeThumbnail } from "./lib/thumbnail.js";
 
@@ -67,12 +67,14 @@ async function init() {
   document.querySelectorAll(".nav-item").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
   $("goAccounts")?.addEventListener("click", (e) => { e.preventDefault(); showView("accounts"); });
   $("genAll").addEventListener("click", generateAll);
+  $("genDraft").addEventListener("click", generateDraft);
   document.querySelectorAll(".mode-tab").forEach((b) => b.addEventListener("click", () => setGenMode(b.dataset.mode)));
   $("editToggle").addEventListener("click", toggleEdit);
   $("copyBtn").addEventListener("click", onCopy);
   $("wpDraftBtn").addEventListener("click", () => wpPublish("draft"));
   $("wpPublishBtn").addEventListener("click", () => wpPublish("publish"));
   $("mainUrlSave").addEventListener("click", onSaveMainUrl);
+  $("markPublishedBtn").addEventListener("click", onMarkPublished);
   $("workBack").addEventListener("click", () => { cur = null; $("workDetail").style.display = "none"; });
   $("myPostAdd").addEventListener("click", onAddMyPost);
   $("myPostSearch").addEventListener("input", () => renderMyPosts());
@@ -118,12 +120,30 @@ function accountsForMode() { return accounts.filter((a) => genMode === "destinat
 async function refreshAccounts() {
   try { accounts = await apiJson("/api/accounts").then((j) => j.accounts || []); } catch { accounts = []; }
   const el = $("genAccCount"); if (el) el.textContent = String(accountsForMode().length);
+  renderAccPicker();
+}
+function renderAccPicker() {
+  const box = $("genAccPick"); if (!box) return;
+  const list = accountsForMode(); box.innerHTML = "";
+  if (!list.length) { box.innerHTML = `<span class="muted">등록된 ${genMode === "destination" ? "목적지" : "쿠션"} 계정이 없습니다. '계정 관리'에서 추가하세요.</span>`; return; }
+  for (const a of list) {
+    const lab = document.createElement("label"); lab.className = "acc-pick";
+    lab.innerHTML = `<input type="checkbox" value="${a.id}" checked>`
+      + `<span class="acc-badge ${genMode === "destination" ? "dest" : "cush"}">${PLAT_LABEL[a.platform] || a.platform}</span>`
+      + `<span class="nm">${escapeHtml(a.name || "(이름없음)")}</span>`;
+    box.appendChild(lab);
+  }
+}
+function selectedAccountsForMode() {
+  const checked = new Set([...document.querySelectorAll("#genAccPick input:checked")].map((i) => i.value));
+  return accountsForMode().filter((a) => checked.has(String(a.id)));
 }
 function setGenMode(mode) {
   genMode = mode;
   document.querySelectorAll(".mode-tab").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
   const cushion = mode === "cushion";
   $("cushDestRow").classList.toggle("hidden", !cushion);
+  $("draftGenRow").classList.toggle("hidden", cushion);
   $("modeAccLabel").textContent = cushion ? "쿠션" : "목적지";
   $("genAll").innerHTML = `<iconify-icon icon="solar:magic-stick-3-bold"></iconify-icon> ${cushion ? "쿠션 생성" : "목적지 생성"}`;
   $("modeHelp").innerHTML = cushion
@@ -460,6 +480,17 @@ async function onSaveMainUrl() {
   $("mainUrlInput").value = "";
   setStatus("✅ 목적지 주소 저장 완료. 이제 블로거·네이버 쿠션이 이 글로 유입됩니다.");
 }
+// 수동 발행 완료 표시 (네이버·블로거 등 HTML 붙여넣기식) → 작업목록에서 제거·보관
+async function onMarkPublished() {
+  if (!cur) return;
+  const url = prompt("발행된 글 주소(URL)를 입력하세요. 없으면 비워도 됩니다:", cur.published_url || "");
+  if (url === null) return;
+  const u = (url || "").trim();
+  await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: cur.id, target: cur.target, destination_id: cur.acc.id, title: cur.article.title || "", status: "published", published_url: u }) }).catch(() => {});
+  if (u && /^https?:\/\//.test(u)) { try { await saveMyPost({ title: cur.article.title || deriveTopic(), url: u, keyword: cur.keyword }, (cur.html || "").replace(/<[^>]+>/g, " ").slice(0, 4000)); } catch {} }
+  setStatus(`✅ '${cur.acc.name || cur.target}' 발행 완료로 표시했습니다.` + (u ? " 발행 자산에도 보관됩니다." : ""));
+  cur = null; $("workDetail").style.display = "none"; renderWorkList();
+}
 
 // ---------- 링크 소스 ----------
 async function gatherRelatedLinks(keyword) {
@@ -606,10 +637,34 @@ async function finalizeForAccount(acc, article, keyword, destUrl) {
   }
   return buildHtmlForAccount(acc, article, keyword, destUrl);
 }
-// 목적지(원본 창작)=Claude 공식 API+웹서치 / 쿠션(초안 재가공)=KIE Claude
-function engineForMode() {
-  if (genMode === "destination") return config.claudeEnabled ? "claude" : "kie";
-  return config.kieEnabled ? "kie" : "claude";
+// 목적지/쿠션 글 생성 = 서드파티(KIE, 웹서치X). 초안(웹서치로 만든 원천자료)에서 정보 추출.
+function engineForMode() { return config.kieEnabled ? "kie" : "claude"; }
+
+// 초안(원천 자료) AI 생성 — Claude 공식 API + 웹서치. 결과를 원본 입력에 채운다.
+async function generateDraft() {
+  if (!config.claudeEnabled) { setStatus("초안 AI 생성은 Claude 공식 API 키가 필요합니다. 설정에서 Anthropic 키를 입력하세요.", true); showView("settings"); return; }
+  const kw = ($("draftKeyword").value || "").trim() || deriveTopic();
+  if (!kw) { setStatus("키워드나 주제를 입력하세요 (또는 트렌드를 클릭).", true); $("draftKeyword").focus(); return; }
+  const exist = $("originalText").value.trim();
+  if (exist && !confirm("원본 입력에 내용이 있습니다. AI 초안으로 교체할까요?")) return;
+  $("genDraft").disabled = true; $("genAll").disabled = true;
+  openProgress("AI 초안 생성 (웹서치)");
+  progressLog(`엔진: Claude 공식 API · 웹서치 ON · 주제: ${kw}`, "done");
+  try {
+    progressStep("웹 검색하며 초안 작성 중… (30초~1분 소요)", 20);
+    const built = buildDraftPrompt({ keyword: kw, today: todayStr(), audience: settings.defaultAudience, tone: settings.defaultTone });
+    const text = await chatComplete({ engine: "claude", system: built.system, user: built.user, maxTokens: 16000 });
+    if (!text || !text.trim()) throw new Error("빈 응답");
+    progressBar(85);
+    $("originalText").value = text.trim();
+    // 초안도 초안함에 보관
+    try { await apiJson("/api/drafts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: (text.split(/\n/)[0] || kw).slice(0, 80), content: text.trim(), keyword: kw, source: "ai-draft" }) }); updateInboxBadge(); } catch {}
+    progressDone(true, "초안 생성 완료 — 내용을 확인하고 '목적지 생성'을 누르세요.");
+    setStatus(`✅ "${kw}" 초안 생성 완료. 검토 후 목적지 생성을 진행하세요.`);
+  } catch (e) {
+    progressDone(false, "초안 생성 실패: " + e.message);
+    setStatus("초안 생성 실패: " + e.message, true);
+  } finally { $("genDraft").disabled = false; $("genAll").disabled = false; }
 }
 async function chatArticle(built) {
   const engine = engineForMode();
@@ -623,11 +678,12 @@ async function generateAll() {
   if (!config.kieEnabled && !config.claudeEnabled) { setStatus("생성 엔진(Claude/KIE) 키가 없습니다. 설정에서 입력하세요.", true); return; }
   if (!$("originalText").value.trim()) { setStatus("원본 글을 붙여넣거나 초안함에서 선택하세요.", true); return; }
   await refreshAccounts();
-  const accts = accountsForMode();
-  if (!accts.length) {
+  if (!accountsForMode().length) {
     setStatus(genMode === "destination" ? "먼저 '계정 관리'에서 목적지 계정을 등록하세요." : "먼저 '계정 관리'에서 쿠션 계정(블로거/네이버)을 등록하세요.", true);
     showView("accounts"); return;
   }
+  const accts = selectedAccountsForMode();
+  if (!accts.length) { setStatus("생성할 계정을 하나 이상 체크하세요.", true); return; }
   let destUrl = "", reference = "";
   if (genMode === "cushion") {
     destUrl = ($("cushDest").value || $("bloggerUrl").value.trim() || destUrlForGen());
@@ -681,8 +737,7 @@ async function generateAll() {
 async function renderWorkList() {
   try { workItems = await apiJson("/api/work").then((j) => j.items || []); } catch { workItems = []; }
   const box = $("workList");
-  if (!workItems.length) { box.innerHTML = '<div class="hist-empty">진행 중 작업이 없습니다. 위에서 생성하세요.</div>'; if (!cur) $("resultCard").style.display = "none"; return; }
-  $("resultCard").style.display = "";
+  if (!workItems.length) { box.innerHTML = '<div class="hist-empty">진행 중 작업이 없습니다. 위에서 생성하세요.</div>'; return; }
   const amap = accById(); box.innerHTML = "";
   for (const w of workItems) {
     const acc = amap[w.destination_id] || { platform: w.target };
@@ -711,6 +766,7 @@ function renderCur() {
   $("metaLine").textContent = `[${cur.acc.name || PLAT_LABEL[cur.target] || cur.target}] ${cur.article.title || ""}` + (cur.resolvedType ? ` · 유형:${cur.resolvedType}` : "") + `\n메타: ${cur.article.metaDescription || "-"}`;
   $("preview").srcdoc = buildPreviewDoc(cur.article.title || "", cur.html);
   $("wpActions").classList.toggle("hidden", cur.target !== "wordpress");
+  $("markPublishedBtn").classList.toggle("hidden", cur.target === "wordpress");
   $("mainUrlRow").classList.toggle("hidden", !isDestRole(cur.acc));
   renderImageEditors();
   if (editMode) renderEditor();

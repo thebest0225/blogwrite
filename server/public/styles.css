@@ -204,6 +204,23 @@ select { appearance: none; background-image: url("data:image/svg+xml;utf8,<svg x
 .trend-newslink:hover { border-color: var(--accent); color: var(--accent); background: #fff; text-decoration: none; }
 .trend-newslink iconify-icon { font-size: 13px; }
 
+/* ===== 계정 선택 픽커 ===== */
+.gen-accpick-wrap { display: flex; flex-direction: column; gap: 8px; }
+.gen-accpick-head { font-size: 13px; color: var(--ink-2); }
+.gen-accpick { display: flex; flex-wrap: wrap; gap: 8px; }
+.acc-pick { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line-2); background: var(--surface); border-radius: 999px; padding: 6px 12px 6px 10px; cursor: pointer; font-size: 13px; transition: all .15s var(--ease); }
+.acc-pick:hover { border-color: #cfcfd6; background: var(--surface-2); }
+.acc-pick:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.acc-pick input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+.acc-pick .acc-badge { padding: 2px 8px; }
+.acc-pick .nm { font-weight: 600; color: var(--ink); }
+
+/* ===== 초안 AI 생성 박스 ===== */
+.draft-gen { border: 1px dashed #c7c9f0; background: var(--accent-soft); border-radius: var(--radius-sm); padding: 13px 14px; display: flex; flex-direction: column; gap: 10px; }
+.draft-gen-head { font-size: 13px; color: var(--ink-2); display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.draft-gen-head iconify-icon { color: var(--accent); font-size: 18px; }
+.draft-gen-head .muted { flex-basis: 100%; }
+
 /* ===== 목적지 주소 강조 행 ===== */
 .mainurl-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--accent-soft); border: 1px solid #dfe2fb; border-radius: var(--radius-sm); padding: 12px 14px; }
 .mainurl-row input { flex: 1; min-width: 200px; }
