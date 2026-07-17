@@ -490,7 +490,7 @@ async function onSaveOptions() {
 }
 
 // ---------- 트렌드 ----------
-let _trendsLoaded = false;
+let _trendsLoaded = false, selectedTrend = null;
 const STATE_MARK = { "+": "▲", n: "N", s: "" };
 function seedFromTrend(it) {
   const lines = [it.title];
@@ -526,9 +526,10 @@ async function renderTrends(force) {
     card.addEventListener("click", () => {
       setGenMode("draft");
       $("draftKeyword").value = it.title;
+      selectedTrend = { title: it.title, traffic: it.traffic || "", newsTitle: it.newsTitle || "", newsSource: it.newsSource || "", source: it.source || "" };
       $("draftKeyword").focus();
       $("draftGenRow").scrollIntoView({ behavior: "smooth", block: "center" });
-      setStatus(`✨ "${it.title}" 주제를 초안 키워드에 넣었어요. 'AI 초안 생성'을 누르세요.`);
+      setStatus(`✨ "${it.title}" 트렌드를 초안 키워드에 넣었어요(뉴스 맥락 반영). 'AI 초안 생성'을 누르세요.`);
     });
     if (it.newsUrl) {
       const a = document.createElement("a"); a.className = "trend-newslink"; a.href = it.newsUrl; a.target = "_blank"; a.rel = "noopener";
@@ -610,9 +611,12 @@ async function onMarkPublished() {
 
 // ---------- 링크 소스 ----------
 async function gatherRelatedLinks(keyword) {
-  const myPosts = matchMyPosts(await getAllMyPosts(), keyword);
+  const all = await getAllMyPosts();
+  const myPosts = matchMyPosts(all, keyword);
   const seenM = new Set(), mp = [];
   for (const it of myPosts) if (it?.link && !seenM.has(it.link)) { seenM.add(it.link); mp.push(it); }
+  // 키워드 매칭이 적으면 최근 발행글로 보충 — 내부 크로스링크는 항상 넣는 게 SEO에 유리
+  if (mp.length < 3) { for (const p of all) { if (mp.length >= 6) break; if (p.url && !seenM.has(p.url)) { seenM.add(p.url); mp.push({ title: p.title, link: p.url }); } } }
   lastMyPosts = mp.slice(0, 8);
   const embedded = extractLinksFromText($("originalText").value || "");
   const seenS = new Set(), src = [];
@@ -683,21 +687,37 @@ async function genBlockImageAcc(acc, b, article, keyword) {
   if (isThumb && settings.thumbnailMode === "overlay") { try { url = await composeThumbnail({ imageUrl: url, text: headline, accent: settings.overlayAccent || "#ff2d55", aspect }); } catch (e) { console.warn(e); } }
   b.resolvedUrl = url;
 }
-const ENTICERS = ["지금 바로 확인 →", "안 보면 손해 →", "여기서 확인 →", "놓치지 마세요 →"];
+const ENTICERS = ["지금 바로 확인 →", "놓치면 후회해요 →", "여기서 정리 끝 →", "이것도 꼭 보세요 →", "한눈에 보기 →"];
+const REL_SUBS = ["안 보면 손해!", "가장 많이 본 글", "함께 보면 좋아요", "이런 것도 찾으셨죠?"];
 function insertTopCard(article, card) {
   const blocks = article.blocks || [];
   let idx = blocks.findIndex((b) => b.type === "image" && b.slot === "thumbnail"); idx = idx >= 0 ? idx + 1 : 0;
   blocks.splice(idx, 0, card); article.blocks = blocks;
 }
+function insertCardAt(article, card, ratio) {
+  const blocks = article.blocks || [];
+  // 본문 중반(ratio 지점)의 heading 근처에 삽입
+  let idx = Math.max(2, Math.round(blocks.length * ratio));
+  while (idx < blocks.length && blocks[idx].type === "image") idx++;
+  blocks.splice(Math.min(idx, blocks.length), 0, card); article.blocks = blocks;
+}
+function relItems(posts, start = 0, n = 3) {
+  return (posts || []).slice(start, start + n).map((p, i) => ({ icon: "🔗", title: p.title, subtitle: REL_SUBS[i % REL_SUBS.length], label: ENTICERS[i % ENTICERS.length], url: p.link }));
+}
 function ensureTopLinkcard(role, article, keyword, relatedPosts, destUrl) {
   const blocks = article.blocks || [];
   if (blocks.slice(0, 4).some((b) => b.type === "linkcard")) return;
   const kw = (keyword || article.title || "").trim();
+  const posts = relatedPosts || [];
   const items = [];
   if (role === "cushion" && destUrl) items.push({ icon: "▶️", title: `${kw} 전체 내용 자세히 보기`, subtitle: "핵심만 빠르게 확인", label: "자세히 보기 →", url: destUrl, featured: true });
-  (relatedPosts || []).slice(0, 3).forEach((p, i) => items.push({ icon: "🔗", title: p.title, subtitle: "함께 보면 좋은 글", label: ENTICERS[i] || "바로가기 →", url: p.link, featured: (role === "destination" && !items.length) }));
-  if (!items.length) return;
-  insertTopCard(article, { type: "linkcard", heading: role === "destination" ? "👉 이 글과 함께 보면 좋아요" : "👉 먼저 확인하세요", items });
+  // 상단 카드: 내부 연관글 최대 2개
+  relItems(posts, 0, 2).forEach((it, i) => { if (role === "destination" && i === 0 && !items.length) it.featured = true; items.push(it); });
+  if (items.length) insertTopCard(article, { type: "linkcard", heading: role === "destination" ? "👉 이 글과 함께 꼭 보세요" : "👉 먼저 확인하세요", items });
+  // 목적지: 연관글이 더 있으면 본문 중반에 두 번째 카드(내부링크 강화 → 체류·SEO)
+  if (role === "destination" && posts.length > 2) {
+    insertCardAt(article, { type: "linkcard", heading: "👉 이런 정보도 찾고 계셨죠?", items: relItems(posts, 2, 3) }, 0.6);
+  }
 }
 function ensureNaverFunnel(article, keyword, relatedPosts, destUrl) {
   const blocks = article.blocks || [];
@@ -768,7 +788,12 @@ async function generateDraft() {
   progressLog(`엔진: Claude 공식 API · 웹서치 ON · 주제: ${kw}`, "done");
   try {
     progressStep("웹 검색하며 초안 작성 중… (30초~1분 소요)", 20);
-    const built = buildDraftPrompt({ keyword: kw, today: todayStr(), audience: settings.defaultAudience, tone: settings.defaultTone });
+    // 트렌드에서 온 키워드면 뉴스 맥락을 근거로 넘겨 트렌드에 맞는 초안·연관키워드가 나오게
+    let trendRef = "";
+    if (selectedTrend && selectedTrend.title === kw) {
+      trendRef = `[지금 뜨는 트렌드 맥락 — 이 흐름을 반영해 최신 이슈 각도로 써라]\n- 트렌드 키워드: ${selectedTrend.title}${selectedTrend.traffic ? ` (검색량 ${selectedTrend.traffic})` : ""}\n${selectedTrend.newsTitle ? `- 관련 뉴스: ${selectedTrend.newsTitle}${selectedTrend.newsSource ? " / " + selectedTrend.newsSource : ""}\n` : ""}- 지금 이 주제를 검색하는 사람들이 실제로 궁금해할 각도(배경·인물·쟁점·전망)와 연관 검색어를 잘 잡아라.`;
+    }
+    const built = buildDraftPrompt({ keyword: kw, reference: trendRef, today: todayStr(), audience: settings.defaultAudience, tone: settings.defaultTone });
     const text = await chatComplete({ engine: "claude", system: built.system, user: built.user, maxTokens: 16000 });
     if (!text || !text.trim()) throw new Error("빈 응답");
     progressBar(85);

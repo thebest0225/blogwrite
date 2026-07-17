@@ -262,23 +262,33 @@ app.get("/api/naver-search", async (req, res) => {
 });
 
 // ---- 워드프레스 발행 (사용자별 목적지 자격 / .env 폴백) ----
+// 사이트 주소 정규화: 스킴 없으면 https:// 붙이고 끝 슬래시 제거
+const normSite = (u) => { let s = String(u || "").trim().replace(/\/+$/, ""); if (s && !/^https?:\/\//i.test(s)) s = "https://" + s; return s; };
 function resolveWp(userId, destId) {
   const dests = DB.listDestinations(userId);
   let pick = destId ? dests.find((d) => d.id === destId) : (dests.find((d) => d.platform === "wordpress" && d.is_default) || dests.find((d) => d.platform === "wordpress"));
-  if (pick) { const full = DB.getDestination(userId, pick.id); if (full && full.platform === "wordpress") return { site: full.site_url, user: full.creds?.user, pass: full.creds?.appPassword }; }
-  if (WP_SITE) return { site: WP_SITE, user: WP_USER, pass: WP_PASS };
+  if (pick) { const full = DB.getDestination(userId, pick.id); if (full && full.platform === "wordpress") return { site: normSite(full.site_url), user: full.creds?.user, pass: full.creds?.appPassword }; }
+  if (WP_SITE) return { site: normSite(WP_SITE), user: WP_USER, pass: WP_PASS };
   return null;
 }
 app.post("/api/wp", async (req, res) => {
   const wp = resolveWp(req.userId, req.body?.destinationId);
-  if (!wp || !wp.site) return res.status(400).json({ error: "워드프레스 목적지가 설정되지 않았습니다(목적지 관리에서 등록)." });
+  if (!wp || !wp.site) return res.status(400).json({ error: "워드프레스 목적지가 설정되지 않았습니다(계정 관리에서 등록)." });
+  if (!wp.user || !wp.pass) return res.status(400).json({ error: "이 워드프레스 계정에 사용자명/응용프로그램 비밀번호가 없습니다(계정 관리에서 입력)." });
   try {
     const { title, content, status = "draft" } = req.body;
-    const auth = "Basic " + Buffer.from(`${wp.user}:${wp.pass}`).toString("base64");
-    const r = await fetch(`${wp.site.replace(/\/+$/, "")}/wp-json/wp/v2/posts`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify({ title, content, status }) });
-    const j = await r.json(); if (!r.ok) throw new Error(j.message || r.status);
+    const auth = "Basic " + Buffer.from(`${wp.user}:${String(wp.pass).replace(/\s+/g, "")}`).toString("base64");
+    const r = await fetch(`${wp.site}/wp-json/wp/v2/posts`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify({ title, content, status }) });
+    const text = await r.text();
+    let j = {}; try { j = JSON.parse(text); } catch {}
+    if (!r.ok) {
+      if (r.status === 401 || r.status === 403 || j.code === "rest_cannot_create") {
+        return res.status(400).json({ error: `WP 인증 실패(${r.status}): 로그인 비밀번호가 아니라 '응용프로그램 비밀번호'가 필요합니다. WP 관리자→사용자→프로필→응용프로그램 비밀번호에서 발급 후 계정 관리에 입력하세요.` });
+      }
+      throw new Error(j.message || `HTTP ${r.status}: ${text.slice(0, 120)}`);
+    }
     res.json({ id: j.id, link: j.link });
-  } catch (e) { res.status(500).json({ error: String(e) }); }
+  } catch (e) { res.status(500).json({ error: "WP 발행 오류: " + String(e.message || e) }); }
 });
 
 // ---- 블로거 OAuth (Google) + 자동발행 ----
@@ -437,9 +447,9 @@ function parseArticle(raw) {
 }
 async function publishServer(userId, acc, { title, content }) {
   if (acc.platform === "wordpress") {
-    const wp = resolveWp(userId, acc.id); if (!wp || !wp.site) throw new Error("WP 자격 없음");
-    const auth = "Basic " + Buffer.from(`${wp.user}:${wp.pass}`).toString("base64");
-    const r = await fetch(`${wp.site.replace(/\/+$/, "")}/wp-json/wp/v2/posts`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify({ title, content, status: "publish" }) });
+    const wp = resolveWp(userId, acc.id); if (!wp || !wp.site || !wp.user || !wp.pass) throw new Error("WP 자격 없음(응용프로그램 비밀번호 확인)");
+    const auth = "Basic " + Buffer.from(`${wp.user}:${String(wp.pass).replace(/\s+/g, "")}`).toString("base64");
+    const r = await fetch(`${wp.site}/wp-json/wp/v2/posts`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify({ title, content, status: "publish" }) });
     const j = await r.json(); if (!r.ok) throw new Error(j.message || r.status); return j.link;
   }
   if (acc.platform === "blogger") {
