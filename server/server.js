@@ -688,8 +688,8 @@ async function checkSchedules() {
     const nowIso = new Date().toISOString();
     const due = DB.dueSchedules(nowIso); for (const s of due) await runSchedule(s);
     const dueWork = DB.dueWorkPublish(nowIso); for (const w of dueWork) await publishDueWorkItem(w);   // 예약 발행 큐
-    // 초안 자동 처리(설정 ON 사용자)
-    for (const d of DB.newAutoDrafts(5)) { if (DB.getSettingsRaw(d.user_id).autoProcessDrafts) await processAutoDraft(d.user_id, d); }
+    // 초안 자동 처리(설정 ON 사용자) — 이미 예약된 초안은 건너뜀(중복 방지)
+    for (const d of DB.newAutoDrafts(5)) { if (DB.getSettingsRaw(d.user_id).autoProcessDrafts && !DB.draftHasSchedule(d.user_id, d.id)) await processAutoDraft(d.user_id, d); }
   }
   catch (e) { console.error("[schedule] loop error", e); }
   finally { _schedRunning = false; }

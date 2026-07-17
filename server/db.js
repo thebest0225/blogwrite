@@ -181,6 +181,8 @@ export function deleteDraft(userId, id) { db.prepare("DELETE FROM drafts WHERE u
 export function setDraftStatus(userId, id, status) { db.prepare("UPDATE drafts SET status=? WHERE user_id=? AND id=?").run(status, uid(userId), id); }
 // 자동 처리 대상: 들어온(mcp/ai) 새 초안 (전 사용자, 소량씩)
 export function newAutoDrafts(limit = 5) { return db.prepare("SELECT * FROM drafts WHERE status='new' AND source IN ('mcp','ai-draft') ORDER BY date LIMIT ?").all(limit); }
+// 이 초안이 예약(대기/실행중)에 이미 물려있나 → 자동처리 중복 방지
+export function draftHasSchedule(userId, draftId) { return !!db.prepare("SELECT 1 FROM schedules WHERE user_id=? AND draft_id=? AND status IN ('pending','running') LIMIT 1").get(uid(userId), draftId); }
 
 // ---- 발행 자산(연관 링크 소스) ----
 export function listAssets(userId) { return db.prepare("SELECT date,url,title,keyword,excerpt FROM assets WHERE user_id=? ORDER BY date DESC").all(uid(userId)); }
