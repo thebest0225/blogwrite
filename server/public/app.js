@@ -86,7 +86,8 @@ async function init() {
   $("goAccounts")?.addEventListener("click", (e) => { e.preventDefault(); showView("accounts"); });
   $("genAll").addEventListener("click", generateAll);
   $("genDraft").addEventListener("click", generateDraft);
-  $("originalText").addEventListener("input", () => { activeDraftId = null; if (genMode !== "draft") { $("genKeyword").value = deriveTopic(); autoSelectAccountsByTopic(true); } });  // 수동 편집/붙여넣기 = 새 초안 + 주제 재추출 + 목적지 자동선택
+  // 편집해도 불러온 초안 연결은 유지(발행 시 '사용됨' 처리되게). 주제 재추출·목적지 자동선택만.
+  $("originalText").addEventListener("input", () => { if (genMode !== "draft") { $("genKeyword").value = deriveTopic(); autoSelectAccountsByTopic(true); } });
   $("genKeyword").addEventListener("input", () => autoSelectAccountsByTopic(true));
   $("copyDraftPrompt").addEventListener("click", copyDraftPromptText);
   document.querySelectorAll(".mode-tab").forEach((b) => b.addEventListener("click", () => setGenMode(b.dataset.mode)));
