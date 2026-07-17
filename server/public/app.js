@@ -19,8 +19,9 @@ const DEFAULT_THUMB_STYLE =
 const DEFAULTS = {
   genEngine: "claude", kieChatModel: "claude-sonnet-5", imageResolution: "1K",
   thumbnailMode: "ai_full", thumbnailStylePrompt: "", overlayAccent: "#ff2d55",
-  linkMode: "search", myBlogUrl: "", defaultTone: "친근하고 신뢰감 있는",
-  defaultAudience: "관련 정보를 처음 찾아보는 일반 독자", authorBio: "",
+  linkMode: "preserve", myBlogUrl: "", defaultTone: "친근하고 신뢰감 있는",
+  defaultAudience: "관련 정보를 처음 찾아보는 일반 독자",
+  authorBio: "여러 분야의 정보를 직접 찾아보고, 최신 자료와 공식 출처를 확인해 이해하기 쉽게 정리합니다. 검색만으로는 흩어져 있던 내용을 한곳에 모아, 실제로 도움이 되는 알맹이만 담으려 합니다.",
   adEnabled: false, adCode: "", internalLinks: false, generateImages: true, imageCount: 1, autoPublish: false
 };
 
@@ -435,7 +436,7 @@ function populateSettings() {
   $("optChatModel").value = settings.kieChatModel || "claude-sonnet-5";
   $("optThumbMode").value = settings.thumbnailMode || "ai_full";
   $("optImgRes").value = settings.imageResolution || "1K";
-  $("optLinkMode").value = settings.linkMode || "search";
+  $("optLinkMode").value = settings.linkMode || "preserve";
   $("optAccent").value = settings.overlayAccent || "#ff2d55";
   $("optMyBlog").value = settings.myBlogUrl || "";
   $("optTone").value = settings.defaultTone || "";
@@ -706,13 +707,13 @@ function buildHtmlForAccount(acc, article, keyword, destUrl) {
   try {
     return buildHtml(article, {
       adEnabled: settings.adEnabled, adCode: settings.adCode, accent: settings.overlayAccent || "#e11d48",
-      searchLinks: settings.linkMode !== "model", searchContext: keyword || article?.title || "",
+      linkMode: settings.linkMode || "preserve", searchContext: keyword || article?.title || "",
       relatedUrls: myPosts.map((x) => x.link), relatedPosts: myPosts, sources: isNaver ? [] : lastSources,
       selfUrl: isDestRole(acc) ? "" : destUrl
     }).html;
   } catch (e) {
     console.error("preview build error:", e);
-    try { return buildHtml(article, { accent: settings.overlayAccent || "#e11d48", searchLinks: false }).html; }
+    try { return buildHtml(article, { accent: settings.overlayAccent || "#e11d48", linkMode: settings.linkMode || "preserve" }).html; }
     catch { return `<h1>${(article?.title || "").replace(/</g, "&lt;")}</h1><p>미리보기 조립 오류. HTML 복사는 가능합니다.</p>`; }
   }
 }

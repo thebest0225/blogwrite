@@ -61,7 +61,7 @@ const S = {
 // 1) 모델(claude 리서치) URL 모드 && 모델이 실제 URL을 준 경우 → 그대로
 // 2) 그 외 → 버튼 문구의 '의도'에 맞는 실제 목적지로 라우팅(smartLink)
 function resolveHref(url, label, cfg) {
-  // 1) 원본/모델이 준 '실제 URL'은 항상 그대로 사용 (원본 링크 최대한 활용)
+  // 1) 원본/모델(클로드 웹서치)이 준 '실제 URL'은 항상 그대로 사용 — 공식 홈·뉴스 등 신뢰 링크 보존
   if (url && url !== "#" && /^https?:\/\//i.test(url)) return url;
   // 2) '자세히 보기'류 문구는 목적지(내 메인/원본)로 연결
   if (cfg.selfUrl) {
@@ -70,7 +70,12 @@ function resolveHref(url, label, cfg) {
     const official = /넷플릭스|netflix|티빙|웨이브|디즈니|유튜브|youtube|나무위키|위키|공식|예고편|뉴스|기사|쿠팡/i.test(l);
     if (selfish && !official) return cfg.selfUrl;
   }
-  return smartLink(label, cfg);
+  // 3) 불명확한(URL 없는) 링크 처리
+  //  - "search" 모드: 문구 의도에 맞는 검색/실목적지로 보완(절대 404 없음)
+  //  - 기본(preserve): 검색결과 링크는 만들지 않음. 내 실제 연관글이 있으면 그걸로, 없으면 링크 제거(텍스트로)
+  if (cfg.linkMode === "search") return smartLink(label, cfg);
+  if (cfg.relatedUrls && cfg.relatedUrls.length) { const u = cfg.relatedUrls[cfg._i % cfg.relatedUrls.length]; cfg._i++; if (u) return u; }
+  return "";
 }
 
 // 버튼 문구 뜻에 맞는 실제 목적지 URL 생성.
@@ -138,6 +143,7 @@ function renderBlock(b, cfg) {
       // 유튜브 영상 URL이면 버튼 대신 재생 플레이어로 임베드
       const yid = ytId(url) || ytId(b.url);
       if (yid) return ytEmbed(yid, b.label || "");
+      if (!url) return "";   // 목적지 없는 버튼은 렌더 안 함(죽은 링크·검색결과 링크 방지)
       const cta = `display:inline-block;background:${accent};color:#fff;padding:13px 28px;border-radius:10px;font-weight:700;text-decoration:none;box-shadow:0 3px 10px rgba(0,0,0,.18);`;
       return `<div style="text-align:center;margin:1.4em 0;"><a class="awb-cta" href="${esc(url)}" target="_blank" rel="noopener" style="${cta}">${esc(b.label || "자세히 보기")}</a></div>`;
     }
@@ -145,6 +151,7 @@ function renderBlock(b, cfg) {
       const rows = (b.items || []).map((it) => {
         const feat = !!it.featured;
         const href = resolveHref(it.url, it.title || it.label, cfg);
+        if (!href) return "";   // 실목적지 없는 항목은 링크카드에서 제외(검색결과 링크 방지)
         const rowBg = feat ? "#1a1a1a" : "#fff";
         const rowBorder = feat ? "#1a1a1a" : "#eee";
         const tColor = feat ? "#ffffff" : "#111";
@@ -158,6 +165,7 @@ function renderBlock(b, cfg) {
           + `<div class="awb-btn" style="background:${accent};color:#fff;border-radius:999px;padding:8px 16px;font-weight:700;font-size:.85em;white-space:nowrap;">${esc(it.label || "보기 →")}</div>`
           + `</div></a>`;
       }).join("");
+      if (!rows.trim()) return "";   // 유효 링크가 하나도 없으면 카드 자체를 렌더 안 함
       return `<div style="border:1px solid #f0dede;border-radius:18px;padding:16px;margin:1.5em 0;background:linear-gradient(180deg,#ffffff,#fff8f8);box-shadow:0 8px 24px rgba(0,0,0,.06);">`
         + `${b.heading ? `<h4 style="margin:0 0 10px;font-size:1em;font-weight:700;color:${accent};">${esc(b.heading)}</h4>` : ""}${rows}</div>`;
     }
@@ -219,7 +227,7 @@ export function buildHtml(article, opts = {}) {
   const accent = opts.accent || "#e11d48";
   const cfg = {
     accent,
-    searchLinks: opts.searchLinks !== false,   // 기본: 링크를 안전하게 처리(관련 URL/검색)
+    linkMode: opts.linkMode || "preserve",      // preserve=원본·공식 링크 그대로(기본) / search=불명확 링크 검색보완
     searchBase: opts.searchBase || "https://search.naver.com/search.naver?query=",
     searchContext: opts.searchContext || "",
     relatedUrls: Array.isArray(opts.relatedUrls) ? opts.relatedUrls : [],

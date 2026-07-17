@@ -380,8 +380,9 @@ app.post("/api/work/delete", (req, res) => { if (req.body?.id) DB.deleteWorkItem
 const SETTINGS_DEFAULTS = {
   genEngine: "claude", kieChatModel: "claude-sonnet-5", imageResolution: "1K",
   thumbnailMode: "ai_full", thumbnailStylePrompt: "", overlayAccent: "#ff2d55",
-  linkMode: "search", myBlogUrl: "", defaultTone: "친근하고 신뢰감 있는",
-  defaultAudience: "관련 정보를 처음 찾아보는 일반 독자", authorBio: "",
+  linkMode: "preserve", myBlogUrl: "", defaultTone: "친근하고 신뢰감 있는",
+  defaultAudience: "관련 정보를 처음 찾아보는 일반 독자",
+  authorBio: "여러 분야의 정보를 직접 찾아보고, 최신 자료와 공식 출처를 확인해 이해하기 쉽게 정리합니다. 검색만으로는 흩어져 있던 내용을 한곳에 모아, 실제로 도움이 되는 알맹이만 담으려 합니다.",
   adEnabled: false, adCode: "", internalLinks: false, generateImages: true, imageCount: 1
 };
 app.get("/api/settings", (req, res) => res.json({ ...SETTINGS_DEFAULTS, ...DB.getSettings(req.userId) }));
@@ -492,7 +493,7 @@ async function runSchedule(s) {
       const article = parseArticle(content);
       if (!article) continue;
       article.today = today; article.keyword = keyword; if (st.authorBio) article.authorBio = st.authorBio;
-      const html = buildHtml(article, { accent: st.overlayAccent || "#e11d48", searchLinks: st.linkMode !== "model", adEnabled: st.adEnabled, adCode: st.adCode });
+      const html = buildHtml(article, { accent: st.overlayAccent || "#e11d48", linkMode: st.linkMode || "preserve", adEnabled: st.adEnabled, adCode: st.adCode }).html;
       const wid = DB.upsertWorkItem(userId, { target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated" });
       made++;
       // 4) 발행 수준
