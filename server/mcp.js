@@ -10,15 +10,11 @@ import { randomUUID } from "crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
+import * as DB from "./db.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DRAFTS = path.join(__dirname, "drafts.json");
-const STORE = path.join(__dirname, "records.json");
 const TOKEN = process.env.MCP_TOKEN || "";
 const PORT = process.env.MCP_PORT || 3100;
-
-const loadJson = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return []; } };
-const saveJson = (f, a) => fs.writeFileSync(f, JSON.stringify(a));
+const MCP_USER_ID = parseInt(process.env.MCP_USER_ID || "1", 10);   // 단일 사용자(추후 OAuth로 사용자별 매핑)
 
 // ---- MCP 서버(도구) 팩토리 (요청마다 생성: 무상태) ----
 function buildServer() {
@@ -34,9 +30,7 @@ function buildServer() {
       keyword: z.string().optional().describe("핵심 키워드(선택)")
     },
     async ({ title, content, keyword }) => {
-      const a = loadJson(DRAFTS);
-      const rec = { id: "d" + Date.now().toString(36) + randomUUID().slice(0, 4), date: new Date().toISOString(), status: "new", title: title || "(제목없음)", content: content || "", keyword: keyword || "", source: "mcp" };
-      a.push(rec); saveJson(DRAFTS, a);
+      const rec = DB.addDraft(MCP_USER_ID, { title, content, keyword, source: "mcp" });
       return { content: [{ type: "text", text: `✅ 초안함에 저장됨 (id: ${rec.id}). 블로그라이터 웹앱(write.mangois.love)에서 가공·발행하세요.` }] };
     }
   );
@@ -47,7 +41,7 @@ function buildServer() {
     "블로그라이터 초안함에 쌓인 최근 초안 목록을 반환한다.",
     { limit: z.number().optional().describe("개수(기본 20)") },
     async ({ limit }) => {
-      const a = loadJson(DRAFTS).slice().reverse().slice(0, limit || 20)
+      const a = DB.listDrafts(MCP_USER_ID).slice(0, limit || 20)
         .map((d) => ({ id: d.id, title: d.title, keyword: d.keyword, status: d.status, date: d.date }));
       return { content: [{ type: "text", text: JSON.stringify(a, null, 2) }] };
     }
@@ -59,16 +53,8 @@ function buildServer() {
     "이미 발행한 내 글들(제목·URL·키워드)을 키워드로 검색한다. 초안을 쓸 때 관련 있는 내 글의 URL을 본문에 자연스럽게 링크로 녹이면 내부 유입에 좋다.",
     { query: z.string().describe("검색 키워드/주제") },
     async ({ query }) => {
-      const kw = (query || "").toLowerCase().trim();
-      const tokens = kw.split(/\s+/).filter((t) => t.length >= 2);
-      const posts = loadJson(STORE).filter((r) => r.type === "post" && r.url && /^https?:\/\//.test(r.url));
-      const scored = posts.map((p) => {
-        const hay = ((p.title || "") + " " + (p.keyword || "")).toLowerCase();
-        let s = 0; for (const t of tokens) if (hay.includes(t)) s++; if (hay.includes(kw)) s += 2;
-        return { p, s };
-      }).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).slice(0, 8)
-        .map((x) => ({ title: x.p.title, url: x.p.url, keyword: x.p.keyword || "" }));
-      return { content: [{ type: "text", text: scored.length ? JSON.stringify(scored, null, 2) : "관련 발행글 없음(아직 축적 전)." }] };
+      const hits = DB.searchAssets(MCP_USER_ID, query).map((p) => ({ title: p.title, url: p.url, keyword: p.keyword || "" }));
+      return { content: [{ type: "text", text: hits.length ? JSON.stringify(hits, null, 2) : "관련 발행글 없음(아직 축적 전)." }] };
     }
   );
 

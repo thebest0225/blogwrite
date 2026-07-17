@@ -6,6 +6,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import * as DB from "./db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -22,22 +23,31 @@ app.use((req, res, next) => {
   next();
 });
 
-// ---- MangoHub SSO 인증 (세션 쿠키는 .mangois.love 공유) ----
-const MANGOHUB_VERIFY = process.env.MANGOHUB_VERIFY || "http://localhost:8000/api/auth/verify";
+// ---- MangoHub SSO 인증 (세션 쿠키는 .mangois.love 공유) + user_id 확보(멀티테넌시) ----
+const MANGOHUB_ME = process.env.MANGOHUB_ME || "http://localhost:8000/api/auth/me";
 const LOGIN_URL = process.env.LOGIN_URL || "https://mangois.love/";
 const PUBLIC_PATHS = new Set(["/styles.css", "/app.js", "/favicon.ico", "/health"]);
-async function isAuthed(req) {
+const _userCache = new Map(); // session_token → {id, ts}
+async function resolveUser(req) {
   const cookie = req.headers.cookie || "";
-  if (!/session_token=/.test(cookie)) return false;
+  const m = cookie.match(/session_token=([^;]+)/);
+  if (!m) return null;
+  const tok = m[1];
+  const c = _userCache.get(tok);
+  if (c && Date.now() - c.ts < 60000) return c.id;
   try {
-    const r = await fetch(MANGOHUB_VERIFY, { headers: { Cookie: cookie, "X-Page-Key": "blogwrite" } });
-    return r.ok;
-  } catch { return false; }
+    const r = await fetch(MANGOHUB_ME, { headers: { Cookie: cookie } });
+    if (!r.ok) return null;
+    const u = await r.json();
+    if (u && u.id && u.status === "active") { _userCache.set(tok, { id: u.id, ts: Date.now() }); return u.id; }
+  } catch {}
+  return null;
 }
 app.get("/health", (req, res) => res.json({ ok: true }));
 app.use(async (req, res, next) => {
   if (PUBLIC_PATHS.has(req.path) || req.path.startsWith("/lib/")) return next();
-  if (await isAuthed(req)) return next();
+  const userId = await resolveUser(req);
+  if (userId) { req.userId = userId; return next(); }
   if (req.path.startsWith("/api/")) return res.status(401).json({ error: "MangoHub 로그인이 필요합니다.", login: LOGIN_URL });
   return res.redirect(302, LOGIN_URL);
 });
@@ -62,15 +72,15 @@ const saveStore = (a) => fs.writeFileSync(STORE, JSON.stringify(a));
 const loadDrafts = () => { try { return JSON.parse(fs.readFileSync(DRAFTS, "utf8")); } catch { return []; } };
 const saveDrafts = (a) => fs.writeFileSync(DRAFTS, JSON.stringify(a));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const kieHeaders = () => ({ Authorization: `Bearer ${KIE}`, "Content-Type": "application/json" });
+const kieHeaders = (key) => ({ Authorization: `Bearer ${key || KIE}`, "Content-Type": "application/json" });
 
 // ---- 글 생성 (KIE Claude) ----
-async function kieChat({ system, user, maxTokens, temperature, model, prefillJson }) {
+async function kieChat({ system, user, maxTokens, temperature, model, prefillJson, apiKey }) {
   const messages = [{ role: "user", content: user }];
   // JSON 강제: 어시스턴트 응답을 "{" 로 시작하게 프리필 → 서두(거부성 멘트) 원천 차단
   if (prefillJson) messages.push({ role: "assistant", content: "{" });
   const r = await fetch(`${KIE_BASE}/claude/v1/messages`, {
-    method: "POST", headers: kieHeaders(),
+    method: "POST", headers: kieHeaders(apiKey),
     body: JSON.stringify({ model: model || CHAT_MODEL, system, messages, max_tokens: maxTokens, temperature, stream: false })
   });
   const t = await r.text();
@@ -88,12 +98,12 @@ async function kieChat({ system, user, maxTokens, temperature, model, prefillJso
   return content;
 }
 // ---- 글 생성 (Claude 공식 API, 웹서치 O) ----
-async function anthropicChat({ system, user, maxTokens = 16000, model, webSearch = true }) {
+async function anthropicChat({ system, user, maxTokens = 16000, model, webSearch = true, apiKey }) {
   const body = { model: model || ANTHROPIC_MODEL, max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] };
   if (webSearch) body.tools = [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }];
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    headers: { "x-api-key": apiKey || ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify(body)
   });
   const t = await r.text();
@@ -106,20 +116,21 @@ async function anthropicChat({ system, user, maxTokens = 16000, model, webSearch
 
 app.post("/api/chat", async (req, res) => {
   const { system, user, maxTokens = 16000, temperature = 0.8, model, prefillJson = true, engine } = req.body;
-  const useClaude = (engine === "claude" || (!engine && DEFAULT_ENGINE === "claude")) && !!ANTHROPIC_KEY;
+  const aKey = DB.getSecret(req.userId, "anthropicKey") || ANTHROPIC_KEY;
+  const kKey = DB.getSecret(req.userId, "kieKey") || KIE;
+  const useClaude = (engine === "claude" || (!engine && DEFAULT_ENGINE === "claude")) && !!aKey;
   let content = "", lastErr = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt) await sleep(1200);
     try {
       content = useClaude
-        ? await anthropicChat({ system, user, maxTokens, webSearch: true })
-        : await kieChat({ system, user, maxTokens, temperature, model, prefillJson });
+        ? await anthropicChat({ system, user, maxTokens, webSearch: true, apiKey: aKey })
+        : await kieChat({ system, user, maxTokens, temperature, model, prefillJson, apiKey: kKey });
       if (content && content.trim()) break;
       lastErr = new Error("빈 응답");
     } catch (e) {
       lastErr = e;
-      // Claude 실패 시 KIE로 폴백(마지막 시도)
-      if (useClaude && attempt === 1) { try { content = await kieChat({ system, user, maxTokens, temperature, model, prefillJson }); if (content && content.trim()) break; } catch (e2) { lastErr = e2; } }
+      if (useClaude && attempt === 1) { try { content = await kieChat({ system, user, maxTokens, temperature, model, prefillJson, apiKey: kKey }); if (content && content.trim()) break; } catch (e2) { lastErr = e2; } }
     }
   }
   if (content && content.trim()) return res.json({ content });
@@ -133,14 +144,14 @@ async function kieSafeJson(r) {
   if (!r.ok || /^\s*<(?:!doctype|html)|no-js ie6 oldie/i.test(t)) throw new Error(`KIE 게이트웨이 오류(${r.status})`);
   try { return JSON.parse(t); } catch { throw new Error("KIE 응답 형식 오류"); }
 }
-async function runImageJob(model, input) {
-  const g = await fetch(`${KIE_BASE}/api/v1/jobs/createTask`, { method: "POST", headers: kieHeaders(), body: JSON.stringify({ model, input }) });
+async function runImageJob(model, input, apiKey) {
+  const g = await fetch(`${KIE_BASE}/api/v1/jobs/createTask`, { method: "POST", headers: kieHeaders(apiKey), body: JSON.stringify({ model, input }) });
   const gj = await kieSafeJson(g);
   if (gj.code !== 200) throw new Error(gj.msg || "createTask 실패");
   const id = gj.data.taskId;
   for (let i = 0; i < 90; i++) {
     await sleep(2000);
-    const inf = await fetch(`${KIE_BASE}/api/v1/jobs/recordInfo?taskId=${encodeURIComponent(id)}`, { headers: kieHeaders() });
+    const inf = await fetch(`${KIE_BASE}/api/v1/jobs/recordInfo?taskId=${encodeURIComponent(id)}`, { headers: kieHeaders(apiKey) });
     let d; try { d = (await kieSafeJson(inf)).data; } catch { continue; }
     if (!d) continue;
     if (d.state === "success") { let u = []; try { u = JSON.parse(d.resultJson || "{}").resultUrls || []; } catch {} if (u[0]) return u[0]; throw new Error("결과 URL 없음"); }
@@ -149,11 +160,11 @@ async function runImageJob(model, input) {
   throw new Error("이미지 시간초과");
 }
 app.post("/api/image", async (req, res) => {
-  try { const { prompt, aspect = "4:3", resolution = "1K" } = req.body; res.json({ url: await runImageJob(IMAGE_MODEL, { prompt, aspect_ratio: aspect, resolution }) }); }
+  try { const kKey = DB.getSecret(req.userId, "kieKey") || KIE; const { prompt, aspect = "4:3", resolution = "1K" } = req.body; res.json({ url: await runImageJob(IMAGE_MODEL, { prompt, aspect_ratio: aspect, resolution }, kKey) }); }
   catch (e) { res.status(500).json({ error: String(e) }); }
 });
 app.post("/api/image-edit", async (req, res) => {
-  try { const { imageUrl, prompt, aspect = "4:3", resolution = "1K" } = req.body; res.json({ url: await runImageJob("gpt-image-2-image-to-image", { prompt, input_urls: [imageUrl], aspect_ratio: aspect, resolution }) }); }
+  try { const kKey = DB.getSecret(req.userId, "kieKey") || KIE; const { imageUrl, prompt, aspect = "4:3", resolution = "1K" } = req.body; res.json({ url: await runImageJob("gpt-image-2-image-to-image", { prompt, input_urls: [imageUrl], aspect_ratio: aspect, resolution }, kKey) }); }
   catch (e) { res.status(500).json({ error: String(e) }); }
 });
 
@@ -212,78 +223,90 @@ app.get("/api/naver-search", async (req, res) => {
   } catch { res.json({ items: [] }); }
 });
 
-// ---- 워드프레스 발행 ----
+// ---- 워드프레스 발행 (사용자별 목적지 자격 / .env 폴백) ----
+function resolveWp(userId, destId) {
+  const dests = DB.listDestinations(userId);
+  let pick = destId ? dests.find((d) => d.id === destId) : (dests.find((d) => d.platform === "wordpress" && d.is_default) || dests.find((d) => d.platform === "wordpress"));
+  if (pick) { const full = DB.getDestination(userId, pick.id); if (full && full.platform === "wordpress") return { site: full.site_url, user: full.creds?.user, pass: full.creds?.appPassword }; }
+  if (WP_SITE) return { site: WP_SITE, user: WP_USER, pass: WP_PASS };
+  return null;
+}
 app.post("/api/wp", async (req, res) => {
-  if (!WP_SITE) return res.status(400).json({ error: "WP 미설정" });
+  const wp = resolveWp(req.userId, req.body?.destinationId);
+  if (!wp || !wp.site) return res.status(400).json({ error: "워드프레스 목적지가 설정되지 않았습니다(목적지 관리에서 등록)." });
   try {
     const { title, content, status = "draft" } = req.body;
-    const auth = "Basic " + Buffer.from(`${WP_USER}:${WP_PASS}`).toString("base64");
-    const r = await fetch(`${WP_SITE.replace(/\/+$/, "")}/wp-json/wp/v2/posts`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify({ title, content, status }) });
+    const auth = "Basic " + Buffer.from(`${wp.user}:${wp.pass}`).toString("base64");
+    const r = await fetch(`${wp.site.replace(/\/+$/, "")}/wp-json/wp/v2/posts`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify({ title, content, status }) });
     const j = await r.json(); if (!r.ok) throw new Error(j.message || r.status);
     res.json({ id: j.id, link: j.link });
   } catch (e) { res.status(500).json({ error: String(e) }); }
 });
 
-// ---- 기록/보관함 저장소 ----
-app.get("/api/store", (req, res) => res.json({ records: loadStore().reverse() }));
-app.post("/api/store", (req, res) => { const a = loadStore(); a.push({ date: new Date().toISOString(), ...req.body }); saveStore(a); res.json({ ok: true }); });
-// 보관함 항목 삭제 (url 기준)
-app.post("/api/store/delete", (req, res) => {
-  const { url } = req.body || {};
-  if (!url) return res.json({ ok: false });
-  saveStore(loadStore().filter((r) => r.url !== url));
-  res.json({ ok: true });
-});
+// ---- 발행 자산(보관함) — /api/store 호환 shim (assets) ----
+app.get("/api/store", (req, res) => res.json({ records: DB.listAssets(req.userId).map((a) => ({ type: "post", url: a.url, title: a.title, keyword: a.keyword, date: a.date })) }));
+app.post("/api/store", (req, res) => { const b = req.body || {}; if (b.type === "post" && b.url) DB.addAsset(req.userId, { url: b.url, title: b.title, keyword: b.keyword, excerpt: b.body }); res.json({ ok: true }); });
+app.post("/api/store/delete", (req, res) => { if (req.body?.url) DB.deleteAsset(req.userId, req.body.url); res.json({ ok: true }); });
 
-// ---- 초안함 (MCP로 받은 초안 리스트) ----
-app.get("/api/drafts", (req, res) => res.json({ drafts: loadDrafts().slice().reverse() }));
-app.post("/api/drafts", (req, res) => {
-  const d = req.body || {};
-  const rec = { id: "d" + Date.now().toString(36), date: new Date().toISOString(), status: "new", title: d.title || "(제목없음)", content: d.content || "", keyword: d.keyword || "", source: d.source || "web" };
-  const a = loadDrafts(); a.push(rec); saveDrafts(a);
-  res.json({ ok: true, draft: rec });
-});
-app.post("/api/drafts/delete", (req, res) => {
-  const { id } = req.body || {};
-  saveDrafts(loadDrafts().filter((r) => r.id !== id));
-  res.json({ ok: true });
-});
-app.post("/api/drafts/status", (req, res) => {
-  const { id, status } = req.body || {};
-  const a = loadDrafts(); const r = a.find((x) => x.id === id); if (r) { r.status = status; saveDrafts(a); }
-  res.json({ ok: true });
-});
+// ---- 초안함 ----
+app.get("/api/drafts", (req, res) => res.json({ drafts: DB.listDrafts(req.userId) }));
+app.post("/api/drafts", (req, res) => res.json({ ok: true, draft: DB.addDraft(req.userId, req.body || {}) }));
+app.post("/api/drafts/delete", (req, res) => { if (req.body?.id) DB.deleteDraft(req.userId, req.body.id); res.json({ ok: true }); });
+app.post("/api/drafts/status", (req, res) => { if (req.body?.id) DB.setDraftStatus(req.userId, req.body.id, req.body.status); res.json({ ok: true }); });
 
-// ---- 비민감 설정 저장 (settings.json) ----
-const SETTINGS = path.join(__dirname, "settings.json");
+// ---- 목적지 관리 ----
+app.get("/api/destinations", (req, res) => res.json({ destinations: DB.listDestinations(req.userId) }));
+app.post("/api/destinations", (req, res) => res.json({ ok: true, destinations: DB.upsertDestination(req.userId, req.body || {}) }));
+app.post("/api/destinations/delete", (req, res) => res.json({ ok: true, destinations: DB.deleteDestination(req.userId, req.body?.id) }));
+
+// ---- 작업 항목(칸반) ----
+app.get("/api/work", (req, res) => res.json({ items: DB.listWorkItems(req.userId, req.query.status) }));
+app.get("/api/work/:id", (req, res) => { const w = DB.getWorkItem(req.userId, req.params.id); w ? res.json(w) : res.status(404).json({ error: "not found" }); });
+app.post("/api/work", (req, res) => res.json({ ok: true, id: DB.upsertWorkItem(req.userId, req.body || {}) }));
+app.post("/api/work/delete", (req, res) => { if (req.body?.id) DB.deleteWorkItem(req.userId, req.body.id); res.json({ ok: true }); });
+
+// ---- 설정 (사용자별, 민감키 암호화) ----
 const SETTINGS_DEFAULTS = {
-  genEngine: "claude",          // claude(웹서치) | kie
-  kieChatModel: "claude-sonnet-5",
-  imageResolution: "1K",
-  thumbnailMode: "ai_full",     // ai_full | overlay | off
-  thumbnailStylePrompt: "",     // 비우면 프론트 기본값 사용
-  overlayAccent: "#ff2d55",
-  linkMode: "search",           // search | model
-  myBlogUrl: "",
-  defaultTone: "친근하고 신뢰감 있는",
-  defaultAudience: "관련 정보를 처음 찾아보는 일반 독자",
-  authorBio: "",
-  adEnabled: false,
-  adCode: "",
-  internalLinks: false,
-  generateImages: true,
-  imageCount: 1
+  genEngine: "claude", kieChatModel: "claude-sonnet-5", imageResolution: "1K",
+  thumbnailMode: "ai_full", thumbnailStylePrompt: "", overlayAccent: "#ff2d55",
+  linkMode: "search", myBlogUrl: "", defaultTone: "친근하고 신뢰감 있는",
+  defaultAudience: "관련 정보를 처음 찾아보는 일반 독자", authorBio: "",
+  adEnabled: false, adCode: "", internalLinks: false, generateImages: true, imageCount: 1
 };
-const loadSettings = () => { try { return { ...SETTINGS_DEFAULTS, ...JSON.parse(fs.readFileSync(SETTINGS, "utf8")) }; } catch { return { ...SETTINGS_DEFAULTS }; } };
-app.get("/api/settings", (req, res) => res.json(loadSettings()));
-app.post("/api/settings", (req, res) => {
-  const merged = { ...loadSettings(), ...(req.body || {}) };
-  fs.writeFileSync(SETTINGS, JSON.stringify(merged, null, 2));
-  res.json({ ok: true, settings: merged });
+app.get("/api/settings", (req, res) => res.json({ ...SETTINGS_DEFAULTS, ...DB.getSettings(req.userId) }));
+app.post("/api/settings", (req, res) => res.json({ ok: true, settings: { ...SETTINGS_DEFAULTS, ...DB.saveSettings(req.userId, req.body || {}) } }));
+
+// ---- 프론트용 상태(사용자별) ----
+app.get("/api/config", (req, res) => {
+  const s = DB.getSettingsRaw(req.userId);
+  res.json({
+    kieEnabled: !!s.kieKey || !!KIE,
+    claudeEnabled: !!s.anthropicKey || !!ANTHROPIC_KEY,
+    wpEnabled: DB.listDestinations(req.userId).some((d) => d.platform === "wordpress") || !!WP_SITE,
+    naverEnabled: !!NAVER_ID,
+    defaultEngine: s.genEngine || DEFAULT_ENGINE
+  });
 });
 
-// (선택) 비밀 설정이 아닌 프론트용 기본값 제공
-app.get("/api/config", (req, res) => res.json({ kieEnabled: !!KIE, wpEnabled: !!WP_SITE, naverEnabled: !!NAVER_ID, claudeEnabled: !!ANTHROPIC_KEY, defaultEngine: DEFAULT_ENGINE }));
+// ---- 기존 JSON → SQLite 1회 이관 (user 1) + .env WP를 기본 목적지로 ----
+function migrateOnce() {
+  const flag = path.join(__dirname, ".migrated_v2");
+  if (fs.existsSync(flag)) return;
+  try {
+    const U = 1;
+    // settings.json → user 1 설정
+    try { const s = JSON.parse(fs.readFileSync(path.join(__dirname, "settings.json"), "utf8")); DB.saveSettings(U, s); } catch {}
+    // drafts.json → drafts
+    try { for (const d of JSON.parse(fs.readFileSync(DRAFTS, "utf8"))) DB.addDraft(U, d); } catch {}
+    // records.json (type post) → assets
+    try { for (const r of JSON.parse(fs.readFileSync(STORE, "utf8"))) if (r.type === "post" && r.url) DB.addAsset(U, { url: r.url, title: r.title, keyword: r.keyword, excerpt: r.body }); } catch {}
+    // .env WP → 기본 목적지
+    if (WP_SITE && !DB.listDestinations(U).length) DB.upsertDestination(U, { name: "기본 워드프레스", platform: "wordpress", site_url: WP_SITE, creds: { user: WP_USER, appPassword: WP_PASS }, is_default: true });
+    fs.writeFileSync(flag, new Date().toISOString());
+    console.log("[migrate] JSON→SQLite 이관 완료(user 1)");
+  } catch (e) { console.warn("[migrate] 실패:", e.message); }
+}
+migrateOnce();
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`블로그 오토라이터 서버: http://localhost:${PORT}`));
