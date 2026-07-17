@@ -102,7 +102,7 @@ function showView(name) {
   else if (name === "accounts") renderAccounts();
   else if (name === "assets") renderMyPosts();
   else if (name === "schedule") renderSchedules();
-  else if (name === "new") { setGenMode(genMode); }
+  else if (name === "new") { setGenMode(genMode); if (!_trendsLoaded) renderTrends(false); }
   else if (name === "settings") populateSettings();
   window.scrollTo({ top: 0 });
 }
@@ -314,20 +314,58 @@ async function onSaveOptions() {
 }
 
 // ---------- 트렌드 ----------
+let _trendsLoaded = false;
+const STATE_MARK = { "+": "▲", n: "N", s: "" };
+function seedFromTrend(it) {
+  const lines = [it.title];
+  const bits = [];
+  if (it.traffic) bits.push(`검색량 ${it.traffic}`);
+  if (it.source === "google") bits.push("구글 급상승"); else if (it.source === "signal") bits.push("실시간 검색어");
+  if (bits.length) lines.push(`(${bits.join(" · ")})`);
+  if (it.newsTitle) lines.push(`\n참고 뉴스: ${it.newsTitle}${it.newsSource ? " — " + it.newsSource : ""}`);
+  if (it.newsUrl) lines.push(it.newsUrl);
+  lines.push(`\n위 주제로 최신 정보를 반영한 상세한 블로그 글을 작성해줘. 핵심 배경, 왜 화제인지, 독자가 알아야 할 포인트, 관련 팁을 포함해서.`);
+  return lines.join("\n");
+}
 async function renderTrends(force) {
   const box = $("trendList"); box.innerHTML = '<div class="hist-empty">불러오는 중…</div>';
   let data; try { data = await apiTrends(force); } catch { data = { items: [], ts: Date.now() }; }
-  const items = data.items || []; box.innerHTML = "";
-  if (!items.length) { box.innerHTML = '<div class="hist-empty">트렌드를 불러오지 못했어요.</div>'; return; }
+  const items = data.items || []; box.innerHTML = ""; _trendsLoaded = true;
+  if (!items.length) { box.innerHTML = '<div class="hist-empty">트렌드를 불러오지 못했어요. 잠시 후 새로고침 해보세요.</div>'; $("trendMeta").textContent = ""; return; }
   const d = new Date(data.ts || Date.now());
-  $("trendMeta").textContent = `구글 급상승 · ${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")} 기준`;
+  const srcLabel = data.source === "signal" ? "실시간 검색어" : "구글 급상승";
+  $("trendMeta").textContent = `${srcLabel} · ${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")} 기준`;
   items.forEach((it, i) => {
-    const row = document.createElement("div"); row.className = "hist-item";
-    const b = document.createElement("button"); b.className = "hist-load"; b.textContent = `${i + 1}. ${it.title}`;
-    b.addEventListener("click", async () => { try { await navigator.clipboard.writeText(it.title); } catch {} setStatus(`"${it.title}" 복사됨 — 이 주제로 원본 글을 작성해 붙여넣으세요.`); });
-    row.appendChild(b); box.appendChild(row);
+    const card = document.createElement("button"); card.className = "trend-item"; card.type = "button";
+    const mark = STATE_MARK[it.state] || "";
+    card.innerHTML =
+      `<span class="trend-rank">${i + 1}</span>`
+      + `<span class="trend-main">`
+      + `<span class="trend-kw">${escapeHtml(it.title)}`
+      + (it.traffic ? ` <span class="trend-traffic">${escapeHtml(it.traffic)}</span>` : "")
+      + (mark ? ` <span class="trend-state ${it.state === "+" ? "up" : "new"}">${mark}</span>` : "")
+      + `</span>`
+      + (it.newsTitle ? `<span class="trend-news">${escapeHtml(it.newsTitle)}</span>` : "")
+      + `</span>`;
+    card.addEventListener("click", () => {
+      const cur = $("originalText").value.trim();
+      if (cur && !confirm("원본 입력 내용을 이 트렌드 주제로 교체할까요?")) return;
+      $("originalText").value = seedFromTrend(it);
+      setGenMode("destination");
+      $("originalText").focus();
+      $("originalText").scrollIntoView({ behavior: "smooth", block: "center" });
+      setStatus(`✨ "${it.title}" 주제로 원본 입력을 채웠어요. 내용을 다듬거나 바로 '목적지 생성'을 누르세요.`);
+    });
+    if (it.newsUrl) {
+      const a = document.createElement("a"); a.className = "trend-newslink"; a.href = it.newsUrl; a.target = "_blank"; a.rel = "noopener";
+      a.innerHTML = `<iconify-icon icon="solar:square-top-down-linear"></iconify-icon> 뉴스`;
+      a.addEventListener("click", (e) => e.stopPropagation());
+      card.appendChild(a);
+    }
+    box.appendChild(card);
   });
 }
+function escapeHtml(s) { return String(s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
 // ---------- 발행 글 보관함 (DB 누적) ----------
 async function getAllMyPosts() {

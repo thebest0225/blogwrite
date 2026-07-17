@@ -190,23 +190,52 @@ app.get("/api/keywords", async (req, res) => {
   res.json({ keywords: [...found].filter(Boolean).slice(0, 60) });
 });
 
-// ---- 트렌드 (구글 급상승, 6h 캐시) ----
+// ---- 트렌드 (구글 급상승 신 엔드포인트 + signal.bz 실검, 1h 캐시) ----
 let trendCache = null;
+const unescapeXml = (s) => (s || "").replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, "&").trim();
+const pick = (block, tag) => { const m = block.match(new RegExp("<" + tag + ">([\\s\\S]*?)</" + tag + ">")); return m ? unescapeXml(m[1]) : ""; };
+
+async function fetchGoogleTrends() {
+  for (const url of ["https://trends.google.com/trending/rss?geo=KR", "https://trends.google.co.kr/trending/rss?geo=KR"]) {
+    try {
+      const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } }); if (!r.ok) continue;
+      const xml = await r.text();
+      const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => {
+        const b = m[1];
+        const title = pick(b, "title");
+        const news = b.match(/<ht:news_item>([\s\S]*?)<\/ht:news_item>/);
+        return {
+          title,
+          traffic: pick(b, "ht:approx_traffic"),
+          picture: pick(b, "ht:picture"),
+          newsTitle: news ? pick(news[1], "ht:news_item_title") : "",
+          newsUrl: news ? pick(news[1], "ht:news_item_url") : "",
+          newsSource: news ? pick(news[1], "ht:news_item_source") : "",
+          source: "google",
+        };
+      }).filter((x) => x.title);
+      if (items.length) return items;
+    } catch {}
+  }
+  return [];
+}
+async function fetchSignalTrends() {
+  try {
+    const r = await fetch("https://api.signal.bz/news/realtime", { headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://signal.bz/" } });
+    if (!r.ok) return [];
+    const j = await r.json();
+    return (j.top10 || []).map((t) => ({ title: t.keyword, traffic: "", state: t.state, source: "signal" })).filter((x) => x.title);
+  } catch { return []; }
+}
 app.get("/api/trends", async (req, res) => {
   try {
-    if (!req.query.force && trendCache && Date.now() - trendCache.ts < 6 * 3600 * 1000) return res.json(trendCache);
-    let items = [];
-    for (const url of ["https://trends.google.com/trends/trendingsearches/daily/rss?geo=KR", "https://trends.google.co.kr/trends/trendingsearches/daily/rss?geo=KR"]) {
-      try {
-        const r = await fetch(url); if (!r.ok) continue;
-        const xml = await r.text();
-        items = [...xml.matchAll(/<item>[\s\S]*?<title>(.*?)<\/title>/g)].map((m) => ({ title: m[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim() })).filter((x) => x.title);
-        if (items.length) break;
-      } catch {}
-    }
-    trendCache = { ts: Date.now(), items: items.slice(0, 20) };
+    if (!req.query.force && trendCache && Date.now() - trendCache.ts < 3600 * 1000) return res.json(trendCache);
+    let items = await fetchGoogleTrends();
+    let src = "google";
+    if (!items.length) { items = await fetchSignalTrends(); src = "signal"; }
+    trendCache = { ts: Date.now(), source: src, items: items.slice(0, 20) };
     res.json(trendCache);
-  } catch (e) { res.json({ ts: Date.now(), items: [] }); }
+  } catch (e) { res.json({ ts: Date.now(), source: "none", items: [] }); }
 });
 
 // ---- 네이버 검색 (선택, 링크 그라운딩) — 사용자별 키 ----

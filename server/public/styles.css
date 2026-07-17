@@ -175,6 +175,35 @@ select { appearance: none; background-image: url("data:image/svg+xml;utf8,<svg x
 .mode-tab:hover { border-color: #cfcfd6; color: var(--ink-2); transform: translateY(-1px); }
 .mode-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); box-shadow: 0 4px 16px rgba(79,70,229,.22); }
 
+/* ===== 트렌드 패널 ===== */
+.trend-card { gap: 12px; }
+.trend-head { display: flex; align-items: center; gap: 12px; }
+.trend-head .card-title { flex: 0 0 auto; }
+.trend-head #trendMeta { flex: 1; }
+.trend-head .mini { margin-left: auto; }
+.trend-hint { margin: -4px 0 2px; }
+.trend-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+@media (max-width: 720px) { .trend-grid { grid-template-columns: 1fr; } }
+.trend-item {
+  position: relative; display: flex; align-items: flex-start; gap: 11px; text-align: left;
+  border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius-sm);
+  padding: 12px 14px; cursor: pointer; transition: all .18s var(--ease); overflow: hidden;
+}
+.trend-item:hover { border-color: var(--accent); background: var(--accent-soft); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.trend-rank { flex: 0 0 auto; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; background: var(--surface-2); color: var(--muted); font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.trend-item:hover .trend-rank { background: var(--accent); color: #fff; }
+.trend-item:nth-child(-n+3) .trend-rank { background: #fff1f0; color: #e11d48; }
+.trend-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.trend-kw { font-size: 14px; font-weight: 700; color: var(--ink); letter-spacing: -0.01em; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.trend-traffic { font-size: 11px; font-weight: 700; color: var(--accent-dark); background: var(--accent-soft); border-radius: 999px; padding: 1px 8px; }
+.trend-state { font-size: 10px; font-weight: 800; }
+.trend-state.up { color: #e11d48; }
+.trend-state.new { color: #f59e0b; }
+.trend-news { font-size: 12px; color: var(--muted); line-height: 1.45; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.trend-newslink { flex: 0 0 auto; align-self: center; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: var(--muted); border: 1px solid var(--line-2); border-radius: 999px; padding: 4px 9px; background: var(--surface); white-space: nowrap; transition: all .15s var(--ease); }
+.trend-newslink:hover { border-color: var(--accent); color: var(--accent); background: #fff; text-decoration: none; }
+.trend-newslink iconify-icon { font-size: 13px; }
+
 /* ===== 목적지 주소 강조 행 ===== */
 .mainurl-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--accent-soft); border: 1px solid #dfe2fb; border-radius: var(--radius-sm); padding: 12px 14px; }
 .mainurl-row input { flex: 1; min-width: 200px; }
