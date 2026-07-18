@@ -288,6 +288,9 @@ input.saved::placeholder { color: #10b981; font-weight: 600; opacity: 1; }
 .ied-imggen { display: flex; gap: 6px; align-items: center; margin: 0 0 14px; flex-wrap: wrap; }
 .ied-imggen input { flex: 1; min-width: 180px; font-size: 12.5px; padding: 6px 9px; }
 .ied-imggen button { white-space: nowrap; }
+.ai-edit-row { display: flex; align-items: center; gap: 8px; margin: 8px 0 10px; padding: 8px 10px; background: var(--accent-soft, #f3f4ff); border: 1px solid #e2e5f8; border-radius: 10px; }
+.ai-edit-row input { flex: 1; min-width: 0; font-size: 13px; padding: 8px 10px; border: 1px solid rgba(24,24,27,.12); border-radius: 7px; background: #fff; }
+.ai-edit-row button { white-space: nowrap; }
 
 /* ===== 미리보기 / 결과 ===== */
 .result-actions { display: flex; gap: 8px; align-items: center; }

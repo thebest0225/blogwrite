@@ -118,6 +118,8 @@ async function init() {
   $("bloggerPublishBtn").addEventListener("click", bloggerPublish);
   $("updatePublishBtn").addEventListener("click", updatePublish);
   $("pullLiveBtn").addEventListener("click", pullLive);
+  $("aiEditBtn").addEventListener("click", aiEditArticle);
+  $("aiEditInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); aiEditArticle(); } });
   $("schSource").addEventListener("change", updateSchForm);
   $("schScope").addEventListener("change", updateSchForm);
   $("schSave").addEventListener("click", onScheduleSave);
@@ -1081,6 +1083,34 @@ async function pullLive() {
     renderCur();
     setStatus("✅ 블로그 현재본을 편집기에 반영했습니다. 수정 후 '수정 발행'을 누르세요.");
   } catch (e) { setStatus("불러오기 실패: " + e.message, true); }
+}
+// AI 자연어 수정 — 현재 글 JSON을 통째로 넘겨 요청대로 고친 뒤 되받아 반영(이미지 등 기존 필드 보존)
+async function aiEditArticle() {
+  if (!cur || !cur.article) { setStatus("먼저 작업(글)을 선택하세요.", true); return; }
+  const instr = $("aiEditInput").value.trim();
+  if (!instr) { setStatus("수정 요청을 입력하세요.", true); return; }
+  const btn = $("aiEditBtn"); btn.disabled = true;
+  setStatus("AI가 글을 수정하는 중… (최대 1~2분)");
+  const system = "너는 한국어 블로그 글 편집기다. 주어진 기사 JSON을 사용자의 수정 요청대로 고쳐서 '완전한 JSON 하나'만 반환한다. 규칙: (1) 스키마/필드 구조를 그대로 유지한다. (2) 수정 요청과 무관한 부분은 절대 바꾸지 않는다. (3) 이미지 블록의 resolvedUrl·_genPrompt 등 기존 값은 그대로 보존한다. (4) 'FAQ 완성' 같은 요청이면 비어있는 q/a를 실제 내용으로 채운다. (5) 코드펜스/설명/주석 없이 JSON 객체 하나만 출력한다.";
+  const user = `[수정 요청]\n${instr}\n\n[현재 기사 JSON]\n${JSON.stringify(cur.article)}`;
+  try {
+    let content = await chatComplete({ engine: settings.genEngine, model: settings.kieChatModel, system, user, maxTokens: 16000 });
+    let edited = tryParse(content);
+    if (!edited) { content = await chatComplete({ engine: settings.genEngine, model: settings.kieChatModel, system, user: user + "\n\n(위 형식의 JSON 객체 하나로만, 끊기지 않게 완결해서 출력해줘.)", maxTokens: 16000 }); edited = tryParse(content); }
+    if (!edited || !Array.isArray(edited.blocks)) throw new Error("AI 응답을 해석하지 못했어요. 다시 시도해 주세요.");
+    // 이미지 resolvedUrl 등 기존 필드 순서 매칭으로 보존(모델이 빠뜨려도 유지)
+    const oldImgs = (cur.article.blocks || []).filter((b) => b.type === "image");
+    const newImgs = (edited.blocks || []).filter((b) => b.type === "image");
+    newImgs.forEach((nb, i) => { const ob = oldImgs[i]; if (ob) ["resolvedUrl", "_genPrompt", "_aspect", "_isThumb", "_headline", "credit", "creditUrl"].forEach((k) => { if (nb[k] == null && ob[k] != null) nb[k] = ob[k]; }); });
+    edited.today = cur.article.today || edited.today;
+    edited.keyword = cur.article.keyword || edited.keyword;
+    if (cur.article.authorBio && !edited.authorBio) edited.authorBio = cur.article.authorBio;
+    cur.article = edited;
+    rebuildCur(); await saveCur(); renderCur(); if (editMode) renderEditor();
+    $("aiEditInput").value = "";
+    setStatus("✅ AI 수정 완료. 미리보기를 확인하고, 발행된 글이면 '수정 발행'을 누르세요.");
+  } catch (e) { setStatus("AI 수정 실패: " + e.message, true); }
+  finally { btn.disabled = false; }
 }
 // 이미 발행된 글을 편집 후 원격에 '수정 발행'(업데이트)
 async function updatePublish() {

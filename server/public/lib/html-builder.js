@@ -193,8 +193,9 @@ function renderBlock(b, cfg) {
 }
 
 function renderFaq(faq = []) {
-  if (!faq.length) return "";
-  const items = faq
+  const valid = (faq || []).filter((f) => f && String(f.q || "").trim() && String(f.a || "").trim());  // 빈 질문·답변 항목 제외
+  if (!valid.length) return "";
+  const items = valid
     .map((f) => `<div><p style="${S.faqQ}">Q. ${esc(f.q)}</p><p style="${S.faqA}">A. ${inline(f.a)}</p></div>`)
     .join("");
   return `<h2 style="${S.h2}">자주 묻는 질문 (FAQ)</h2><div style="${S.faqWrap}">${items}</div>`;

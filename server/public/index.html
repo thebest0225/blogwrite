@@ -62,6 +62,11 @@
             <button class="mini primary-mini" id="mainUrlSave">목적지 주소 저장</button>
           </div>
           <div class="meta-line" id="metaLine"></div>
+          <div class="ai-edit-row" id="aiEditRow">
+            <iconify-icon icon="solar:chat-round-line-linear" style="font-size:18px;color:var(--accent);flex:none;"></iconify-icon>
+            <input type="text" id="aiEditInput" placeholder="AI에게 자연어로 수정 요청 — 예: FAQ 자리만 있고 답이 비었으면 마저 완성해줘 / 서론을 더 흥미롭게 / 표에 세금 항목 추가" />
+            <button class="mini primary-mini" id="aiEditBtn"><iconify-icon icon="solar:magic-stick-3-linear"></iconify-icon> AI 수정</button>
+          </div>
           <iframe id="preview" class="preview"></iframe>
           <div id="editor" class="editor hidden"></div>
           <details class="imgedit hidden" id="imgEditBox"><summary><iconify-icon icon="solar:palette-bold-duotone"></iconify-icon> 이미지 수정 / 다시 생성</summary><div id="imgEditList" class="imgedit-list"></div></details>
