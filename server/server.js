@@ -375,6 +375,36 @@ app.post("/api/wp", async (req, res) => {
   } catch (e) { res.status(500).json({ error: "WP 발행 오류: " + String(e.message || e) }); }
 });
 
+// ---- 발행된 글의 '현재(라이브)' 내용 가져오기 (블로그에서 직접 수정분 반영용) ----
+app.post("/api/remote-post", async (req, res) => {
+  const { destinationId, postId, postUrl } = req.body || {};
+  const dest = destinationId ? DB.getDestination(req.userId, destinationId) : null;
+  if (!dest) return res.status(400).json({ error: "목적지를 찾을 수 없습니다." });
+  try {
+    if (dest.platform === "wordpress") {
+      const wp = resolveWp(req.userId, dest.id); if (!wp || !wp.site || !wp.user || !wp.pass) throw new Error("WP 자격 없음");
+      const auth = "Basic " + Buffer.from(`${wp.user}:${String(wp.pass).replace(/\s+/g, "")}`).toString("base64");
+      let id = postId;
+      if (!id && postUrl) { const slug = decodeURIComponent(String(postUrl).replace(/\/+$/, "").split("/").pop() || ""); const sr = await fetch(`${wp.site}/wp-json/wp/v2/posts?slug=${encodeURIComponent(slug)}&status=any`, { headers: { Authorization: auth } }); const arr = await sr.json(); if (Array.isArray(arr) && arr[0]) id = arr[0].id; }
+      if (!id) throw new Error("원격 글 ID를 찾지 못했습니다.");
+      const r = await fetch(`${wp.site}/wp-json/wp/v2/posts/${id}?context=edit`, { headers: { Authorization: auth } });
+      const j = await r.json(); if (!r.ok) throw new Error(j.message || r.status);
+      return res.json({ id, title: (j.title?.raw ?? j.title?.rendered ?? "").toString(), html: (j.content?.rendered ?? j.content?.raw ?? "").toString() });
+    }
+    if (dest.platform === "blogger") {
+      const rt = dest.creds?.refreshToken, blogId = dest.creds?.blogId; if (!rt || !blogId) throw new Error("블로거 미연결");
+      const access = await bloggerAccessToken(rt);
+      let id = postId;
+      if (!id && postUrl) { const p = new URL(postUrl).pathname; const br = await fetch(`https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts/bypath?path=${encodeURIComponent(p)}`, { headers: { Authorization: "Bearer " + access } }); const bj = await br.json(); if (bj && bj.id) id = bj.id; }
+      if (!id) throw new Error("원격 글 ID를 찾지 못했습니다.");
+      const r = await fetch(`https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts/${id}`, { headers: { Authorization: "Bearer " + access } });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error?.message || r.status);
+      return res.json({ id, title: j.title || "", html: j.content || "" });
+    }
+    res.status(400).json({ error: "네이버 등은 라이브 불러오기를 지원하지 않습니다." });
+  } catch (e) { res.status(500).json({ error: "라이브 불러오기 오류: " + String(e.message || e) }); }
+});
+
 // ---- 이미지 → WP 미디어 업로드 (드래그/붙여넣기/웹URL) ----
 app.post("/api/wp-media", async (req, res) => {
   const wp = resolveWp(req.userId, req.body?.destinationId);

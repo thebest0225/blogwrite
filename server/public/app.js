@@ -117,6 +117,7 @@ async function init() {
   $("accGoogleConnect").addEventListener("click", onGoogleConnect);
   $("bloggerPublishBtn").addEventListener("click", bloggerPublish);
   $("updatePublishBtn").addEventListener("click", updatePublish);
+  $("pullLiveBtn").addEventListener("click", pullLive);
   $("schSource").addEventListener("change", updateSchForm);
   $("schScope").addEventListener("change", updateSchForm);
   $("schSave").addEventListener("click", onScheduleSave);
@@ -995,6 +996,67 @@ async function autoPublishWork(acc, wid, article, html, keyword) {
   }
   return res;
 }
+// 라이브(블로그) HTML → 편집기 블록으로 변환
+function inlineToMd(el) {
+  let out = "";
+  el.childNodes.forEach((n) => {
+    if (n.nodeType === 3) out += n.textContent;
+    else if (n.nodeType === 1) {
+      const t = n.tagName.toLowerCase();
+      if (t === "a") out += `[${n.textContent}](${n.getAttribute("href") || "#"})`;
+      else if (t === "strong" || t === "b") out += `**${n.textContent.trim()}**`;
+      else if (t === "em" || t === "i") out += `*${n.textContent.trim()}*`;
+      else if (t === "br") out += "\n";
+      else out += inlineToMd(n);
+    }
+  });
+  return out.replace(/\s+/g, " ").trim();
+}
+function htmlToBlocks(html) {
+  const doc = new DOMParser().parseFromString(html || "", "text/html");
+  const blocks = [];
+  const walk = (nodes) => {
+    nodes.forEach((el) => {
+      if (el.nodeType === 3) { const t = el.textContent.trim(); if (t) blocks.push({ type: "paragraph", text: t }); return; }
+      if (el.nodeType !== 1) return;
+      const tag = el.tagName.toLowerCase();
+      if (tag === "h1" || tag === "h2" || tag === "h3" || tag === "h4") { const tx = el.textContent.trim(); if (tx) blocks.push({ type: "heading", level: tag === "h2" ? 2 : 3, text: tx }); }
+      else if (tag === "img") blocks.push({ type: "image", slot: "body", resolvedUrl: el.getAttribute("src") || "", alt: el.getAttribute("alt") || "" });
+      else if (tag === "p" || tag === "figure") {
+        const img = el.querySelector("img");
+        if (img && !el.textContent.trim()) blocks.push({ type: "image", slot: "body", resolvedUrl: img.getAttribute("src") || "", alt: img.getAttribute("alt") || "" });
+        else { const md = inlineToMd(el); if (md) blocks.push({ type: "paragraph", text: md }); if (img) blocks.push({ type: "image", slot: "body", resolvedUrl: img.getAttribute("src") || "", alt: img.getAttribute("alt") || "" }); }
+      }
+      else if (tag === "ul" || tag === "ol") { const items = [...el.querySelectorAll(":scope > li")].map((li) => inlineToMd(li)).filter(Boolean); if (items.length) blocks.push({ type: "list", ordered: tag === "ol", items }); }
+      else if (tag === "blockquote") { const tx = el.textContent.trim(); if (tx) blocks.push({ type: "callout", style: "info", text: tx }); }
+      else if (tag === "table") { const trs = [...el.querySelectorAll("tr")]; const rows = trs.map((tr) => [...tr.querySelectorAll("th,td")].map((c) => c.textContent.trim())); const headers = rows.shift() || []; if (headers.length) blocks.push({ type: "table", headers, rows }); }
+      else if (tag === "div" || tag === "section" || tag === "article" || tag === "main") walk([...el.childNodes]);
+      else if (tag === "hr" || tag === "script" || tag === "style") { /* skip */ }
+      else { const tx = el.textContent.trim(); if (tx) blocks.push({ type: "paragraph", text: tx }); }
+    });
+  };
+  walk([...doc.body.childNodes]);
+  return blocks.filter((b) => b.type !== "paragraph" || (b.text && b.text.trim()));
+}
+// 블로그의 '현재' 내용을 불러와 편집기에 반영(직접 수정분 덮어쓰기 방지)
+async function pullLive() {
+  if (!cur || (!cur.published_id && !cur.published_url)) return;
+  if (!confirm("블로그에 게시된 '현재' 내용을 불러옵니다.\n지금 편집기의 내용은 블로그 최신본으로 대체됩니다. 계속할까요?")) return;
+  try {
+    setStatus("블로그 현재본 불러오는 중…");
+    const res = await apiJson("/api/remote-post", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ destinationId: cur.acc.id, postId: cur.published_id || undefined, postUrl: cur.published_url || undefined }) });
+    if (res.title) cur.article.title = res.title;
+    const blocks = htmlToBlocks(res.html);
+    if (!blocks.length) { setStatus("불러온 내용이 비어 있습니다.", true); return; }
+    cur.article.blocks = blocks;
+    if (res.id != null) cur.published_id = String(res.id);
+    rebuildCur();
+    await saveCur();
+    if (!editMode) toggleEdit(); else renderEditor();
+    renderCur();
+    setStatus("✅ 블로그 현재본을 편집기에 반영했습니다. 수정 후 '수정 발행'을 누르세요.");
+  } catch (e) { setStatus("불러오기 실패: " + e.message, true); }
+}
 // 이미 발행된 글을 편집 후 원격에 '수정 발행'(업데이트)
 async function updatePublish() {
   if (!cur || (!cur.published_id && !cur.published_url)) return;
@@ -1192,6 +1254,7 @@ function renderCur() {
   $("bloggerPublishBtn").classList.toggle("hidden", published || cur.target !== "blogger");
   $("markPublishedBtn").classList.toggle("hidden", published || cur.target === "wordpress");
   $("updatePublishBtn").classList.toggle("hidden", !canUpdate);
+  $("pullLiveBtn").classList.toggle("hidden", !canUpdate);
   // 예약 발행: 미발행 + WP·블로거만
   const canAuto = !published && (cur.target === "wordpress" || cur.target === "blogger");
   $("schedPubRow").classList.toggle("hidden", !canAuto);

@@ -10,7 +10,30 @@ import { fileURLToPath } from "url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
+import { spawn } from "child_process";
 import * as DB from "./db.js";
+
+const OGU_NEWS_DIR = process.env.OGU_NEWS_DIR || "/var/www/oguonline-news";
+// 오구온라인 뉴스 일괄 발행 (파이썬 배치 스크립트 호출, 검증된 발행 로직 재사용)
+function publishOguNews(articles) {
+  return new Promise((resolve) => {
+    const py = spawn(OGU_NEWS_DIR + "/venv/bin/python", [OGU_NEWS_DIR + "/publish_news_batch.py"], { cwd: OGU_NEWS_DIR });
+    let out = "", err = "";
+    py.stdout.on("data", (d) => (out += d));
+    py.stderr.on("data", (d) => (err += d));
+    py.on("close", () => {
+      try {
+        const line = out.trim().split("\n").filter(Boolean).pop() || "[]";
+        resolve({ ok: true, results: JSON.parse(line) });
+      } catch (e) {
+        resolve({ ok: false, error: String(e), out: out.slice(-600), err: err.slice(-400) });
+      }
+    });
+    py.on("error", (e) => resolve({ ok: false, error: String(e) }));
+    py.stdin.write(JSON.stringify({ articles }));
+    py.stdin.end();
+  });
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN = process.env.MCP_TOKEN || "";
@@ -52,7 +75,9 @@ function buildServer(userId) {
     { title: z.string().describe("초안 제목/주제"), content: z.string().describe("초안 본문 전체 (상세할수록 좋음. 마크다운/링크 포함 가능)"), keyword: z.string().optional().describe("핵심 키워드(선택)") },
     async ({ title, content, keyword }) => {
       const rec = DB.addDraft(userId, { title, content, keyword, source: "mcp" });
-      return { content: [{ type: "text", text: `✅ 초안함에 저장됨 (id: ${rec.id}). 블로그라이터 웹앱(write.mangois.love)에서 가공·발행하세요.` }] };
+      let routed = "";
+      if (rec.dest_id) { const d = DB.getDestination(userId, rec.dest_id); if (d) routed = ` → 니치 자동 배분: ${d.name}`; }
+      return { content: [{ type: "text", text: `✅ 초안함에 저장됨 (id: ${rec.id})${routed}. 블로그라이터 웹앱(write.mangois.love)에서 가공·발행하세요.` }] };
     }
   );
   server.tool(
@@ -71,6 +96,32 @@ function buildServer(userId) {
     async ({ query }) => {
       const hits = DB.searchAssets(userId, query).map((p) => ({ title: p.title, url: p.url, keyword: p.keyword || "" }));
       return { content: [{ type: "text", text: hits.length ? JSON.stringify(hits, null, 2) : "관련 발행글 없음(아직 축적 전)." }] };
+    }
+  );
+  server.tool(
+    "publish_ogu_news",
+    "오구온라인(oguonline.com) 뉴스 기사를 '여러 건 한 번에' 발행한다. 웹서치로 사실을 확인해 작성한 완성 기사들을 배열로 넘기면, 분야별 기자 자동 배정 + 대표이미지 + 발행기록 저장까지 처리해 즉시 게시한다. 한 번에 권장 5~7건(최대 30). 각 기사 body는 완성된 HTML(<p>,<h2>,<table> 등), 본문 1,500~2,300자 권장. category는 다음 중 하나: breaking(속보/사회), politics-economy(정치/경제), it-science(IT/과학), entertainment-sports(연예/스포츠), life(생활). 오구온라인 스타일: 어려운 내용을 '쉽게 풀어보면' 식으로, 3줄요약(summary)과 필요시 비교표를 포함.",
+    {
+      articles: z.array(z.object({
+        title: z.string().describe("기사 제목(28~45자 검색친화)"),
+        body: z.string().describe("완성된 본문 HTML (<p>,<h2>,<table> 등. 실제 수치·출처 포함 권장)"),
+        category: z.string().optional().describe("breaking|politics-economy|it-science|entertainment-sports|life"),
+        tags: z.array(z.string()).optional().describe("한국어 태그 5~7개"),
+        summary: z.array(z.string()).optional().describe("3줄 요약 (핵심 불릿 3개)"),
+        image_query: z.string().optional().describe("대표 이미지용 영문 스톡 검색어"),
+        meta_description: z.string().optional().describe("검색 노출용 요약 1문장")
+      })).describe("발행할 뉴스 기사 배열(여러 건 동시)")
+    },
+    async ({ articles }) => {
+      if (!Array.isArray(articles) || !articles.length)
+        return { content: [{ type: "text", text: "발행할 기사가 없습니다." }] };
+      const r = await publishOguNews(articles);
+      if (!r.ok)
+        return { content: [{ type: "text", text: `발행 처리 실패: ${r.error}\n${r.out || ""}\n${r.err || ""}` }] };
+      const arr = r.results || [];
+      const ok = arr.filter((x) => x.ok);
+      const lines = arr.map((x) => x.ok ? `✅ [${x.category}] ${x.title}\n   ${x.url}` : `❌ ${x.title || "(제목없음)"}: ${x.error}`);
+      return { content: [{ type: "text", text: `오구온라인 발행 ${ok.length}/${arr.length}건 완료\n\n${lines.join("\n")}` }] };
     }
   );
   return server;

@@ -152,13 +152,13 @@ function renderBlock(b, cfg) {
         const feat = !!it.featured;
         const href = resolveHref(it.url, it.title || it.label, cfg);
         if (!href) return "";   // 실목적지 없는 항목은 링크카드에서 제외(검색결과 링크 방지)
-        const rowBg = feat ? "#1a1a1a" : "#fff";
-        const rowBorder = feat ? "#1a1a1a" : "#eee";
-        const tColor = feat ? "#ffffff" : "#111";
-        const sColor = feat ? "#cfcfcf" : "#888";
+        const rowBg = feat ? `${accent}14` : "#fff";       // 라이트 테마: 검정 대신 연한 액센트 톤
+        const rowBorder = feat ? accent : "#eee";
+        const tColor = "#111";                              // 본문 글씨는 항상 어둡게(밝은 배경)
+        const sColor = feat ? "#555" : "#888";
         const icoBg = feat ? accent : "#ffe4e6";
         return `<a href="${esc(href)}" target="_blank" rel="noopener" style="text-decoration:none;display:block;">`
-          + `<div class="awb-row" style="display:flex;align-items:center;gap:12px;border:1px solid ${rowBorder};border-radius:12px;padding:12px 14px;margin:8px 0;background:${rowBg};">`
+          + `<div class="awb-row" style="display:flex;align-items:center;gap:12px;border:${feat ? "2px" : "1px"} solid ${rowBorder};border-radius:12px;padding:12px 14px;margin:8px 0;background:${rowBg};">`
           + `<div style="width:40px;height:40px;border-radius:10px;background:${icoBg};display:flex;align-items:center;justify-content:center;font-size:18px;flex:none;">${esc(it.icon || "▶")}</div>`
           + `<div style="flex:1;min-width:0;"><div style="font-weight:700;color:${tColor};">${esc(it.title || "")}</div>`
           + `${it.subtitle ? `<div style="font-size:.82em;color:${sColor};margin-top:2px;">${esc(it.subtitle)}</div>` : ""}</div>`
