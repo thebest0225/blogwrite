@@ -189,6 +189,22 @@ app.post("/api/image", async (req, res) => {
   try { const kKey = DB.getSecret(req.userId, "kieKey") || KIE; const { prompt, aspect = "4:3", resolution = "1K" } = req.body; res.json({ url: await runImageJob(IMAGE_MODEL, { prompt, aspect_ratio: aspect, resolution }, kKey) }); }
   catch (e) { res.status(500).json({ error: String(e) }); }
 });
+// 서버(자동·예약 발행)용 이미지 생성 — 썸네일(ai_full: 한글 헤드라인 포함) + 본문 1장까지
+const SERVER_THUMB = "Premium eye-catching Korean thumbnail, cinematic high-contrast dramatic lighting, one clear focal subject that POPS (glow/rim light, shallow DOF). If a real person is central, photorealistic dramatic portrait with emotion; product → hero shot; concept → striking symbolic scene. Clean, punchy, NOT busy. NO clip-art graphs/arrows/flags, NO random extra people.";
+async function genArticleImagesServer(article, kKey, thumbStyleOv) {
+  if (!kKey) return;
+  const imgs = (article.blocks || []).filter((b) => b.type === "image" && !b.resolvedUrl).slice(0, 2);
+  for (const b of imgs) {
+    const isThumb = b.slot === "thumbnail";
+    const headline = (b.overlayText || article.title || article.keyword || "").slice(0, 40);
+    let prompt = b.prompt || b.alt || article.keyword || "";
+    let aspect = "4:3";
+    if (isThumb) { aspect = "16:9"; prompt = `${thumbStyleOv || SERVER_THUMB}\n\nScene: ${b.prompt || article.keyword || ""}\n\n상단 영역에 큰 한글 헤드라인을 정확한 맞춤법으로 크게: "${headline}". 하단 1/3은 비워둔다. 작은 모바일 썸네일에서도 읽히게. 클립아트·깨진 글자 금지.`; }
+    try { b.resolvedUrl = await runImageJob(IMAGE_MODEL, { prompt, aspect_ratio: aspect, resolution: "1K" }, kKey); } catch (e) { /* 실패한 이미지는 건너뜀 */ }
+  }
+  // 여전히 URL 없는 이미지 블록은 제거(빈 자리표시 방지)
+  article.blocks = (article.blocks || []).filter((b) => b.type !== "image" || b.resolvedUrl);
+}
 app.post("/api/image-edit", async (req, res) => {
   try { const kKey = DB.getSecret(req.userId, "kieKey") || KIE; const { imageUrl, prompt, aspect = "4:3", resolution = "1K" } = req.body; res.json({ url: await runImageJob("gpt-image-2-image-to-image", { prompt, input_urls: [imageUrl], aspect_ratio: aspect, resolution }, kKey) }); }
   catch (e) { res.status(500).json({ error: String(e) }); }
@@ -653,6 +669,7 @@ async function runSchedule(s) {
       const article = parseArticle(content);
       if (!article) continue;
       article.today = today; article.keyword = keyword; const abio = ov.authorBio || st.authorBio; if (abio) article.authorBio = abio;
+      try { await genArticleImagesServer(article, kKey, ov.thumbStyle || st.thumbnailStylePrompt); } catch {}
       const html = buildHtml(article, { accent: st.overlayAccent || "#e11d48", linkMode: st.linkMode || "preserve", adEnabled: st.adEnabled, adCode: st.adCode }).html;
       const wid = DB.upsertWorkItem(userId, { target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated" });
       made++;
@@ -706,6 +723,7 @@ async function processAutoDraft(userId, draft) {
     for (let attempt = 0; attempt < 2 && !content; attempt++) { try { content = await kieChat({ system: built.system, user: built.user, maxTokens: 16000, temperature: 0.8, model: CHAT_MODEL, prefillJson: true, apiKey: kKey }); } catch (e) { if (attempt) throw e; await sleep(1200); } }
     const article = parseArticle(content); if (!article) throw new Error("파싱 실패");
     article.today = today; article.keyword = keyword; const abio = ov.authorBio || st.authorBio; if (abio) article.authorBio = abio;
+    try { await genArticleImagesServer(article, kKey, ov.thumbStyle || st.thumbnailStylePrompt); } catch {}
     const html = buildHtml(article, { accent: st.overlayAccent || "#e11d48", linkMode: st.linkMode || "preserve", adEnabled: st.adEnabled, adCode: st.adCode }).html;
     DB.upsertWorkItem(userId, { draft_id: draft.id, target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated" });
   } catch (e) { console.error("[auto-draft]", draft.id, e.message); }   // 실패해도 소비됨(재제출 가능)

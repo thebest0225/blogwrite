@@ -1231,7 +1231,12 @@ function mkIconBtn(icon, title, fn) { const b = document.createElement("button")
 
 // ----- 편집기 이미지 드래그/붙여넣기 -----
 const fileToDataUrl = (file) => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(file); });
-async function insertDroppedImage({ file, url, index }) {
+function blockIndexUnder(clientY) {
+  const els = [...document.querySelectorAll("#editor .ied-block")];
+  for (let i = 0; i < els.length; i++) { const r = els[i].getBoundingClientRect(); if (clientY >= r.top && clientY <= r.bottom) return i; }
+  return -1;
+}
+async function insertDroppedImage({ file, url, index, replaceIndex }) {
   if (!cur) return;
   setStatus("이미지 추가 중…");
   try {
@@ -1245,10 +1250,14 @@ async function insertDroppedImage({ file, url, index }) {
     }
     if (!finalUrl) { setStatus("이미지 URL을 가져오지 못했어요.", true); return; }
     const blocks = cur.article.blocks || (cur.article.blocks = []);
-    const at = (typeof index === "number" && index >= 0 && index <= blocks.length) ? index : blocks.length;
-    blocks.splice(at, 0, { type: "image", slot: "body", resolvedUrl: finalUrl, alt: "" });
-    refreshAfterEdit();
-    setStatus("✅ 드롭한 위치에 이미지를 넣었어요. (필요하면 ↑↓로 이동)");
+    if (typeof replaceIndex === "number" && blocks[replaceIndex] && blocks[replaceIndex].type === "image") {
+      blocks[replaceIndex].resolvedUrl = finalUrl; delete blocks[replaceIndex]._genPrompt; delete blocks[replaceIndex].prompt;
+      refreshAfterEdit(); setStatus("✅ 이미지를 교체했어요.");
+    } else {
+      const at = (typeof index === "number" && index >= 0 && index <= blocks.length) ? index : blocks.length;
+      blocks.splice(at, 0, { type: "image", slot: "body", resolvedUrl: finalUrl, alt: "" });
+      refreshAfterEdit(); setStatus("✅ 드롭한 위치에 이미지를 넣었어요. (필요하면 ↑↓로 이동)");
+    }
   } catch (e) { setStatus("이미지 추가 실패: " + e.message, true); }
 }
 // 드롭 Y좌표 → 삽입할 blocks 인덱스
@@ -1294,12 +1303,16 @@ async function onEditorDrop(e) {
   }
   if (!dt) return;
   const idx = dropIndexFromY(e.clientY);
-  // 2) 외부 이미지(파일/웹)
   const file = [...(dt.files || [])].find((f) => f.type.startsWith("image/"));
-  if (file) return insertDroppedImage({ file, index: idx });
-  const url = extractDragUrl(dt);
-  if (url && /^https?:\/\//i.test(url)) return insertDroppedImage({ url, index: idx });
-  setStatus("이미지를 인식하지 못했어요. 이미지 파일이나 웹 이미지를 끌어다 놓아 주세요.", true);
+  const url = file ? null : extractDragUrl(dt);
+  if (!file && !(url && /^https?:\/\//i.test(url))) { setStatus("이미지를 인식하지 못했어요. 이미지 파일이나 웹 이미지를 끌어다 놓아 주세요.", true); return; }
+  // 기존 이미지 블록 위에 놓으면 교체/추가 선택
+  const overIdx = blockIndexUnder(e.clientY);
+  if (overIdx >= 0 && cur.article.blocks[overIdx] && cur.article.blocks[overIdx].type === "image") {
+    const replace = confirm("이 이미지 위에 놓았어요.\n\n[확인] 기존 이미지 교체\n[취소] 이 아래에 새 이미지 추가");
+    return insertDroppedImage(replace ? { file, url, replaceIndex: overIdx } : { file, url, index: overIdx + 1 });
+  }
+  return insertDroppedImage({ file, url, index: idx });
 }
 async function onEditorPaste(e) {
   if (!editMode || !cur) return;
