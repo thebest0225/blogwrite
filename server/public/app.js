@@ -1452,6 +1452,15 @@ function blockRow(b, i) {
     meta.appendChild(mk("출처(선택) — 예: 사진: 국민연금공단", b.credit, (v) => (b.credit = v)));
     meta.appendChild(mk("출처 링크(선택) — https://...", b.creditUrl, (v) => (b.creditUrl = v)));
     row.appendChild(meta);
+    // 이미지 재생성 컨트롤(블록 바로 아래) — 하단 섹션까지 안 내려가도 되게
+    const gen = document.createElement("div"); gen.className = "ied-imggen";
+    const instr = document.createElement("input"); instr.type = "text"; instr.placeholder = "AI 재생성/수정 요청 (예: 배경 더 밝게, 노인 손 클로즈업)";
+    const regenBtn = document.createElement("button"); regenBtn.className = "mini primary-mini"; regenBtn.innerHTML = `<iconify-icon icon="solar:magic-stick-3-linear"></iconify-icon> 다시 생성`;
+    regenBtn.addEventListener("click", () => regenImage(b, instr.value.trim()));
+    const editBtn = document.createElement("button"); editBtn.className = "mini"; editBtn.innerHTML = `<iconify-icon icon="solar:pen-new-square-linear"></iconify-icon> 부분 수정`;
+    editBtn.addEventListener("click", () => editImg(b, instr.value.trim()));
+    gen.appendChild(instr); gen.appendChild(regenBtn); gen.appendChild(editBtn);
+    row.appendChild(gen);
   } else {
     // 구조 블록(버튼/링크카드/영상/표): 실제 렌더된 모습 그대로 표시
     const view = document.createElement("div"); view.className = "ied-view";
