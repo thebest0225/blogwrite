@@ -753,21 +753,29 @@ async function publishDueWorkItem(row) {
   } catch (e) { console.error("[work publish]", row.id, e.message); DB.setWorkPublishAt(userId, row.id, null); tgMsg(userId, "error", [`❌ 예약발행 실패 · <b>${tgEsc(acc.name || acc.platform)}</b>`, `📝 ${tgEsc(full.title)}`, `⚠️ ${tgEsc(e.message || e)}`]); }  // 실패 시 예약 해제(무한 재시도 방지) — 작업보드에 남음
 }
 // 초안 자동 처리: 들어온 초안 → 니치 매칭 목적지 글 생성 → 작업보드(발행 안 함)
-const topicScore = (acc, text) => { const ts = (acc.topics || "").split(/[,\n]/).map((t) => t.trim().toLowerCase()).filter((t) => t.length >= 2); let s = 0; for (const t of ts) if (text.includes(t)) s++; return s; };
+// 니치 토큰 분리: 콤마·줄바꿈·공백 모두 지원(목적지마다 저장 형식이 달라도 매칭되게)
+const topicScore = (acc, text) => { const ts = (acc.topics || "").split(/[,\n\s]+/).map((t) => t.trim().toLowerCase()).filter((t) => t.length >= 2); let s = 0; for (const t of ts) if (t && text.includes(t)) s++; return s; };
+// 반환: 실제로 목적지 글을 생성했으면 true, 니치 매칭이 없어 건너뛰면 false(초안은 'new' 유지)
 async function processAutoDraft(userId, draft) {
   const kKey = DB.getSecret(userId, "kieKey") || KIE;
-  if (!kKey) return;
+  if (!kKey) return false;
   const st = DB.getSettingsRaw(userId);
   const dests = DB.accountsForGeneration(userId).filter(isDestRoleRow);
-  const text = ((draft.keyword || "") + " " + (draft.title || "")).toLowerCase();
+  const text = ((draft.keyword || "") + " " + (draft.title || "") + " " + (draft.content || "").slice(0, 1200)).toLowerCase();
   const scored = dests.map((a) => ({ a, s: topicScore(a, text) })).filter((x) => x.s > 0).sort((x, y) => y.s - x.s);
-  if (!scored.length) return;   // 니치 매칭 없으면 자동처리 안 함(수동으로 두기)
-  // 다중 매칭: 기본 ON이면 니치가 맞는 목적지 '모두'에 각각 글 작성. OFF면 가장 잘 맞는 1곳만.
+  if (!scored.length) return false;   // 니치 매칭 없으면 건너뜀(초안함에 남겨 수동 처리)
+  // 다중 매칭: ON이면 니치가 '충분히' 맞는 목적지 모두에 글 작성(약한 1점짜리 오탐 제외). OFF면 1곳만.
   const multi = st.autoMultiMatch !== false;
-  // 상한(과다 생성 방지): autoMultiMax(기본 0=무제한)
-  const cap = parseInt(st.autoMultiMax, 10) || 0;
-  let list = multi ? scored.map((x) => x.a) : [scored[0].a];
-  if (multi && cap > 0) list = list.slice(0, cap);
+  const cap = parseInt(st.autoMultiMax, 10) || 0;   // 상한(0=무제한)
+  let list;
+  if (multi) {
+    const top = scored[0].s;
+    const thr = Math.max(2, top * 0.5);   // 최상위는 항상 포함, 나머지는 임계값 이상만
+    list = scored.filter((x, i) => i === 0 || x.s >= thr).map((x) => x.a);
+    if (cap > 0) list = list.slice(0, cap);
+  } else {
+    list = [scored[0].a];
+  }
   DB.setDraftStatus(userId, draft.id, "used");   // 먼저 소비(중복처리 방지)
   const today = new Date().toISOString().slice(0, 10);
   const keyword = draft.keyword || firstLine(draft.content);
@@ -788,9 +796,10 @@ async function processAutoDraft(userId, draft) {
       tgMsg(userId, "generate", [`✍️ 초안 자동생성 완료 · <b>${tgEsc(acc.name || acc.platform)}</b>${list.length > 1 ? ` (${made}/${list.length})` : ""}`, `📝 ${tgEsc(article.title)}`, `작업보드에서 확인 후 발행하세요.`]);
     } catch (e) { console.error("[auto-draft]", draft.id, acc.id, e.message); tgMsg(userId, "error", [`❌ 초안 자동생성 실패 · <b>${tgEsc(acc.name || acc.platform)}</b>`, `📥 ${tgEsc(draft.title || draft.keyword || draft.id)}`, `⚠️ ${tgEsc(e.message || e)}`]); }
   }   // 실패해도 초안은 소비됨(재제출 가능)
+  return true;
 }
 const AUTO_INTERVAL = parseInt(process.env.AUTO_PROCESS_INTERVAL_MS, 10) || 10 * 60 * 1000;  // 초안 자동처리 간격(기본 10분)
-let _lastAutoAt = Date.now();   // 시작 후 첫 처리는 약 10분 뒤부터
+let _lastAutoAt = Date.now() - AUTO_INTERVAL + 90 * 1000;   // 시작 후 첫 처리는 약 90초 뒤(확인용), 이후 10분 간격
 let _schedRunning = false;
 async function checkSchedules() {
   if (_schedRunning) return; _schedRunning = true;
@@ -798,10 +807,13 @@ async function checkSchedules() {
     const nowIso = new Date().toISOString();
     const due = DB.dueSchedules(nowIso); for (const s of due) await runSchedule(s);
     const dueWork = DB.dueWorkPublish(nowIso); for (const w of dueWork) await publishDueWorkItem(w);   // 예약 발행 큐
-    // 초안 자동 처리 — 부하 방지: 10분 간격으로 '하나씩' 순차 처리(예약분은 별개). 새 초안은 뒤에 줄서서 순서대로.
+    // 초안 자동 처리 — 부하 방지: 10분 간격으로 '하나씩' 순차 처리(예약분은 별개).
+    // 니치 매칭 안 되는 초안은 건너뛰고, 매칭되는 첫 초안 하나만 처리(큐 막힘 방지). 나머지는 다음 주기에.
     if (Date.now() - _lastAutoAt >= AUTO_INTERVAL) {
-      for (const d of DB.newAutoDrafts(1)) {
-        if (DB.getSettingsRaw(d.user_id).autoProcessDrafts && !DB.draftHasSchedule(d.user_id, d.id)) { await processAutoDraft(d.user_id, d); _lastAutoAt = Date.now(); }
+      for (const d of DB.newAutoDrafts(200)) {
+        if (!DB.getSettingsRaw(d.user_id).autoProcessDrafts || DB.draftHasSchedule(d.user_id, d.id)) continue;
+        const done = await processAutoDraft(d.user_id, d);
+        if (done) { _lastAutoAt = Date.now(); break; }
       }
     }
     // 완료된 예약 정리(2시간 지난 done 삭제)
