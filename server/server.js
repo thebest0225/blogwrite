@@ -763,7 +763,7 @@ async function processAutoDraft(userId, draft) {
   const dests = DB.accountsForGeneration(userId).filter(isDestRoleRow);
   const text = ((draft.keyword || "") + " " + (draft.title || "") + " " + (draft.content || "").slice(0, 1200)).toLowerCase();
   const scored = dests.map((a) => ({ a, s: topicScore(a, text) })).filter((x) => x.s > 0).sort((x, y) => y.s - x.s);
-  if (!scored.length) return false;   // 니치 매칭 없으면 건너뜀(초안함에 남겨 수동 처리)
+  if (!scored.length) return -1;   // 니치 매칭 없음(소비 안 함, 다음 초안으로)
   // 다중 매칭: ON이면 니치가 '충분히' 맞는 목적지 모두에 글 작성(약한 1점짜리 오탐 제외). OFF면 1곳만.
   const multi = st.autoMultiMatch !== false;
   const cap = parseInt(st.autoMultiMax, 10) || 0;   // 상한(0=무제한)
@@ -776,7 +776,6 @@ async function processAutoDraft(userId, draft) {
   } else {
     list = [scored[0].a];
   }
-  DB.setDraftStatus(userId, draft.id, "used");   // 먼저 소비(중복처리 방지)
   const today = new Date().toISOString().slice(0, 10);
   const keyword = draft.keyword || firstLine(draft.content);
   let made = 0;
@@ -786,7 +785,7 @@ async function processAutoDraft(userId, draft) {
       const variant = { persona: acc.persona || "", index: made + 1, total: list.length };
       const built = buildBloggerMain({ sourceText: draft.content || "", keyword, audience: ov.audience || st.defaultAudience, tone: ov.tone || st.defaultTone, authorBio: ov.authorBio || st.authorBio, today, imageCount: 1, reference: "", internalLinks: [], variant });
       let content = "";
-      for (let attempt = 0; attempt < 2 && !content; attempt++) { try { content = await kieChat({ system: built.system, user: built.user, maxTokens: 16000, temperature: 0.8, model: CHAT_MODEL, prefillJson: true, apiKey: kKey }); } catch (e) { if (attempt) throw e; await sleep(1200); } }
+      for (let attempt = 0; attempt < 3 && !content; attempt++) { try { content = await kieChat({ system: built.system, user: built.user, maxTokens: 16000, temperature: 0.8, model: CHAT_MODEL, prefillJson: true, apiKey: kKey }); } catch (e) { if (attempt === 2) throw e; await sleep(1500 * (attempt + 1)); } }
       const article = parseArticle(content); if (!article) throw new Error("파싱 실패");
       article.today = today; article.keyword = keyword; const abio = ov.authorBio || st.authorBio; if (abio) article.authorBio = abio;
       try { await genArticleImagesServer(article, kKey, ov.thumbStyle || st.thumbnailStylePrompt); } catch {}
@@ -795,11 +794,13 @@ async function processAutoDraft(userId, draft) {
       made++;
       tgMsg(userId, "generate", [`✍️ 초안 자동생성 완료 · <b>${tgEsc(acc.name || acc.platform)}</b>${list.length > 1 ? ` (${made}/${list.length})` : ""}`, `📝 ${tgEsc(article.title)}`, `작업보드에서 확인 후 발행하세요.`]);
     } catch (e) { console.error("[auto-draft]", draft.id, acc.id, e.message); tgMsg(userId, "error", [`❌ 초안 자동생성 실패 · <b>${tgEsc(acc.name || acc.platform)}</b>`, `📥 ${tgEsc(draft.title || draft.keyword || draft.id)}`, `⚠️ ${tgEsc(e.message || e)}`]); }
-  }   // 실패해도 초안은 소비됨(재제출 가능)
-  return true;
+  }
+  if (made > 0) DB.setDraftStatus(userId, draft.id, "used");   // 하나라도 생성돼야 소비(실패 시 초안 보존 → 다음 주기 재시도)
+  return made;
 }
 const AUTO_INTERVAL = parseInt(process.env.AUTO_PROCESS_INTERVAL_MS, 10) || 10 * 60 * 1000;  // 초안 자동처리 간격(기본 10분)
 let _lastAutoAt = Date.now() - AUTO_INTERVAL + 90 * 1000;   // 시작 후 첫 처리는 약 90초 뒤(확인용), 이후 10분 간격
+const _autoFails = new Map();   // 초안별 연속 생성 실패 횟수(3회면 건너뜀 → 큐 막힘 방지)
 let _schedRunning = false;
 async function checkSchedules() {
   if (_schedRunning) return; _schedRunning = true;
@@ -812,8 +813,14 @@ async function checkSchedules() {
     if (Date.now() - _lastAutoAt >= AUTO_INTERVAL) {
       for (const d of DB.newAutoDrafts(200)) {
         if (!DB.getSettingsRaw(d.user_id).autoProcessDrafts || DB.draftHasSchedule(d.user_id, d.id)) continue;
-        const done = await processAutoDraft(d.user_id, d);
-        if (done) { _lastAutoAt = Date.now(); break; }
+        const made = await processAutoDraft(d.user_id, d);   // -1: 니치 매칭없음(다음) / 0: 생성실패 / >0: 성공
+        if (made < 0) continue;                               // 매칭 안 되는 초안은 건너뛰고 다음 초안 시도
+        if (made === 0) {                                     // 매칭됐지만 생성 실패(KIE 등) → 초안 보존, 실패 카운트
+          const n = (_autoFails.get(d.id) || 0) + 1; _autoFails.set(d.id, n);
+          if (n >= 3) { DB.setDraftStatus(d.user_id, d.id, "used"); _autoFails.delete(d.id); tgMsg(d.user_id, "error", [`⏭️ 초안 3회 연속 생성 실패로 건너뜀`, `📥 ${tgEsc(d.title || d.id)}`, `초안함에서 직접 확인해 주세요.`]); }
+        } else { _autoFails.delete(d.id); }                   // 성공(이미 'used' 처리됨)
+        _lastAutoAt = Date.now();                             // 매칭된 초안 하나 시도했으면 이번 주기 종료(성공·실패 무관, 과부하 방지)
+        break;
       }
     }
     // 완료된 예약 정리(2시간 지난 done 삭제)
