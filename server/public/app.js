@@ -790,7 +790,9 @@ async function genBlockImageAcc(acc, b, article, keyword) {
   const isThumb = b.slot === "thumbnail";
   const headline = (b.overlayText || article.title || keyword || "").slice(0, 40);
   let genPrompt = b.prompt || b.alt || keyword;
-  const thumbStyle = (acc.overrides && acc.overrides.thumbStyle) || settings.thumbnailStylePrompt || DEFAULT_THUMB_STYLE;
+  const baseThumb = settings.thumbnailStylePrompt || DEFAULT_THUMB_STYLE;
+  const accThumb = acc.overrides && acc.overrides.thumbStyle;
+  const thumbStyle = baseThumb + (accThumb ? `\n[이 블로그 전용 스타일] ${accThumb}` : "");
   if (isThumb && settings.thumbnailMode === "ai_full") {
     genPrompt = `${thumbStyle}\n\nScene: ${b.prompt || keyword}\n\nRender this EXACT Korean headline, HUGE and bold in the TOP area, perfectly spelled, with a solid highlight box behind the single most important word: "${headline}"\n\nHARD RULES: strong subject-vs-background pop (glow/rim light, shallow DOF), high-contrast punchy but CLEAN composition. If a real person is central show ONLY ONE person with clear emotion; otherwise a bold symbolic scene with NO random people. Bottom third clear. NO cartoon mascot, NO clip-art graphs/arrows/flags/finance icons, NO messy collage.`;
   }
