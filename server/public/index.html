@@ -19,6 +19,7 @@
         <button class="nav-item" data-view="inbox"><iconify-icon class="ni" icon="solar:inbox-line-bold-duotone"></iconify-icon> 초안함 <span class="nav-badge hidden" id="inboxBadge">0</span></button>
         <button class="nav-item" data-view="accounts"><iconify-icon class="ni" icon="solar:key-minimalistic-square-bold-duotone"></iconify-icon> 계정 관리</button>
         <button class="nav-item" data-view="schedule"><iconify-icon class="ni" icon="solar:alarm-bold-duotone"></iconify-icon> 자동화·예약</button>
+        <button class="nav-item" data-view="bydraft"><iconify-icon class="ni" icon="solar:folder-with-files-bold-duotone"></iconify-icon> 초안별 결과물</button>
         <button class="nav-item" data-view="history"><iconify-icon class="ni" icon="solar:checklist-minimalistic-bold-duotone"></iconify-icon> 발행 기록</button>
         <button class="nav-item" data-view="assets"><iconify-icon class="ni" icon="solar:link-round-angle-bold-duotone"></iconify-icon> 발행 자산</button>
         <button class="nav-item" data-view="settings"><iconify-icon class="ni" icon="solar:settings-bold-duotone"></iconify-icon> 설정</button>
@@ -215,6 +216,12 @@
           <p class="muted" id="accHint"></p>
           <div class="row" style="justify-content:flex-end;gap:8px;"><input type="hidden" id="accEditId" /><button class="mini" id="accCancel">초기화</button><button class="mini primary-mini" id="accSave">계정 저장</button></div>
         </div>
+      </section>
+
+      <!-- 초안별 결과물 -->
+      <section class="view hidden" data-view="bydraft">
+        <div class="view-head"><h2>초안별 결과물</h2><span class="muted">어떤 초안으로 어떤 글들이 만들어졌는지 묶어서 봅니다</span><button class="mini" id="byDraftRefresh" style="margin-left:auto;">새로고침</button></div>
+        <div id="byDraftList"></div>
       </section>
 
       <!-- 발행 기록 (보관함) -->

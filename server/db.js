@@ -224,6 +224,14 @@ export function getWorkItem(userId, id) {
   if (w && w.article_json) { try { w.article = JSON.parse(w.article_json); } catch {} }
   return w;
 }
+// 초안별 결과물 묶음: 모든 work_item(전 상태) + 관련 초안 제목맵
+export function workItemsByDraft(userId) {
+  const items = db.prepare("SELECT id,draft_id,target,destination_id,title,status,published_url,published_id,publish_mode,publish_at,updated_at FROM work_items WHERE user_id=? ORDER BY updated_at DESC").all(uid(userId));
+  const ids = [...new Set(items.map((i) => i.draft_id).filter(Boolean))];
+  const drafts = {};
+  for (const id of ids) { const d = db.prepare("SELECT id,title,keyword,status,date FROM drafts WHERE user_id=? AND id=?").get(uid(userId), id); if (d) drafts[id] = d; }
+  return { items, drafts };
+}
 export function upsertWorkItem(userId, w) {
   const id = w.id || rid("w");
   const ex = db.prepare("SELECT id FROM work_items WHERE user_id=? AND id=?").get(uid(userId), id);

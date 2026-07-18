@@ -381,3 +381,8 @@ input.saved::placeholder { color: #10b981; font-weight: 600; opacity: 1; }
 .icon-btn { border: 1px solid var(--line-2); background: #fff; font-size: 13px; cursor: pointer; border-radius: 9px; padding: 8px 13px; font-weight: 600; color: var(--ink-2); transition: all .16s var(--ease); }
 .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
 .result-empty { display: flex; align-items: center; justify-content: center; text-align: center; color: #a8a8b0; font-size: 14px; line-height: 1.7; background: var(--surface); border: 1px dashed var(--line-2); border-radius: var(--radius); min-height: 420px; padding: 20px; }
+
+/* 초안별 결과물 묶음 */
+.bydraft-group { margin-bottom: 14px; }
+.bydraft-head { font-size: 15px; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+.bydraft-head iconify-icon { color: var(--accent); }

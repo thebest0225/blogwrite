@@ -567,6 +567,7 @@ app.post("/api/destinations/delete", (req, res) => res.json({ ok: true, destinat
 
 // ---- 작업 항목(칸반) ----
 app.get("/api/work", (req, res) => res.json({ items: DB.listWorkItems(req.userId, req.query.status) }));
+app.get("/api/by-draft", (req, res) => res.json(DB.workItemsByDraft(req.userId)));
 app.get("/api/work/:id", (req, res) => { const w = DB.getWorkItem(req.userId, req.params.id); w ? res.json(w) : res.status(404).json({ error: "not found" }); });
 app.post("/api/work", (req, res) => res.json({ ok: true, id: DB.upsertWorkItem(req.userId, req.body || {}) }));
 app.post("/api/work/delete", (req, res) => { if (req.body?.id) DB.deleteWorkItem(req.userId, req.body.id); res.json({ ok: true }); });
@@ -769,9 +770,9 @@ async function processAutoDraft(userId, draft) {
   const cap = parseInt(st.autoMultiMax, 10) || 0;   // 상한(0=무제한)
   let list;
   if (multi) {
-    const top = scored[0].s;
-    const thr = Math.max(3, top * 0.6);   // 최상위는 항상 포함, 추가 목적지는 '충분히 강한' 매칭만(경계 오탐 방지)
-    list = scored.filter((x, i) => i === 0 || x.s >= thr).map((x) => x.a);
+    // 최상위는 항상 포함, 추가 목적지는 '절대 점수 3 이상'이면 포함(니치 개수 차이에 안정적 + 경계 오탐 방지)
+    const MIN_SECONDARY = 3;
+    list = scored.filter((x, i) => i === 0 || x.s >= MIN_SECONDARY).map((x) => x.a);
     if (cap > 0) list = list.slice(0, cap);
   } else {
     list = [scored[0].a];

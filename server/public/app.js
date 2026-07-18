@@ -129,6 +129,7 @@ async function init() {
   $("pmClose").addEventListener("click", closeProgress);
   $("pmCancel").addEventListener("click", cancelProgress);
   $("historyRefresh").addEventListener("click", renderHistory);
+  $("byDraftRefresh").addEventListener("click", renderByDraft);
   $("historySearch").addEventListener("input", () => renderHistory());
   $("historyFilter").addEventListener("change", () => renderHistory());
   $("historyMode").addEventListener("change", () => renderHistory());
@@ -153,6 +154,7 @@ function showView(name) {
   if (name === "board") renderWorkList();
   else if (name === "inbox") renderDrafts(true);
   else if (name === "accounts") renderAccounts();
+  else if (name === "bydraft") renderByDraft();
   else if (name === "history") renderHistory();
   else if (name === "assets") renderMyPosts();
   else if (name === "schedule") renderSchedules();
@@ -1224,6 +1226,47 @@ async function renderWorkList() {
     const del = document.createElement("button"); del.className = "hist-del"; del.textContent = "✕";
     del.addEventListener("click", async () => { await apiJson("/api/work/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: w.id }) }).catch(() => {}); if (cur && cur.id === w.id) { cur = null; $("workDetail").style.display = "none"; } renderWorkList(); });
     row.appendChild(open); row.appendChild(del); box.appendChild(row);
+  }
+}
+// ---------- 초안별 결과물(묶음 보기) ----------
+async function renderByDraft() {
+  const box = $("byDraftList");
+  box.innerHTML = '<div class="hist-empty">불러오는 중…</div>';
+  let data;
+  try { data = await apiJson("/api/by-draft"); } catch { box.innerHTML = '<div class="hist-empty">불러오기 실패</div>'; return; }
+  const items = data.items || [], drafts = data.drafts || {};
+  const amap = accById();
+  const groups = new Map();
+  for (const w of items) { const key = w.draft_id || "__none__"; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(w); }
+  if (!groups.size) { box.innerHTML = '<div class="hist-empty">아직 생성된 글이 없습니다. 초안이 자동 처리되면 여기 묶여서 보입니다.</div>'; return; }
+  const order = [...groups.entries()].sort((a, b) => {
+    const la = Math.max(...a[1].map((x) => Date.parse(x.updated_at || 0) || 0));
+    const lb = Math.max(...b[1].map((x) => Date.parse(x.updated_at || 0) || 0));
+    return lb - la;
+  });
+  const statusLabel = { generated: "생성됨", published: "발행됨" };
+  box.innerHTML = "";
+  for (const [key, ws] of order) {
+    const d = drafts[key];
+    const title = key === "__none__" ? "직접 생성(초안 없음)" : (d ? (d.title || d.keyword || key) : "삭제된 초안");
+    const pubCount = ws.filter((w) => w.status === "published").length;
+    const card = document.createElement("div"); card.className = "card bydraft-group";
+    card.innerHTML = `<div class="bydraft-head"><iconify-icon icon="solar:inbox-line-linear"></iconify-icon> <b>${escapeHtml(title)}</b> <span class="muted">· 글 ${ws.length}개${pubCount ? ` · 발행 ${pubCount}` : ""}</span></div>`;
+    const list = document.createElement("div"); list.className = "acc-list";
+    for (const w of ws) {
+      const acc = amap[w.destination_id] || { platform: w.target };
+      const dest = isDestRole(acc);
+      const badge = w.status === "published" ? `<span class="pubm" style="background:#e7f7ec;color:#137a3e;">발행됨</span>` : (w.publish_at ? `<span class="pubm" style="background:var(--accent-soft);color:var(--accent-dark);"><iconify-icon icon="solar:clock-circle-linear"></iconify-icon> ${fmtRunAt(w.publish_at)}</span>` : `<span class="df">${statusLabel[w.status] || w.status}</span>`);
+      const row = document.createElement("div"); row.className = "acc-row";
+      row.innerHTML = `<span class="acc-badge ${dest ? "dest" : "cush"}">${dest ? "목적지" : "쿠션"}</span>`
+        + `<span class="acc-plat">${PLAT_LABEL[w.target] || w.target}${acc.name ? " · " + escapeHtml(acc.name) : ""}</span>`
+        + `<span class="nm">${escapeHtml(w.title || "(제목없음)")}</span>` + badge;
+      const open = document.createElement("button"); open.className = "mini"; open.textContent = "열기·편집"; open.addEventListener("click", () => { showView("board"); openWork(w.id); });
+      row.appendChild(open);
+      if (w.published_url) { const a = document.createElement("a"); a.className = "mini"; a.href = w.published_url; a.target = "_blank"; a.rel = "noopener"; a.textContent = "블로그 보기"; row.appendChild(a); }
+      list.appendChild(row);
+    }
+    card.appendChild(list); box.appendChild(card);
   }
 }
 // ---------- 발행 기록(보관함) ----------
