@@ -56,6 +56,7 @@ try { db.exec("ALTER TABLE drafts ADD COLUMN dest_id TEXT"); } catch {}
 // 발행 방식(auto=자동발행 / manual=HTML 수동) 컬럼
 try { db.exec("ALTER TABLE work_items ADD COLUMN publish_mode TEXT"); } catch {}
 try { db.exec("ALTER TABLE work_items ADD COLUMN publish_at TEXT"); } catch {}
+try { db.exec("ALTER TABLE work_items ADD COLUMN published_id TEXT"); } catch {}   // 원격 글 ID(수정발행용)
 // 예약 확장 컬럼 (초안/키워드 소스, 실행일시, 범위, 발행수준, 상태)
 for (const col of [
   "source TEXT DEFAULT 'keyword'", "draft_id TEXT", "run_at TEXT",
@@ -210,8 +211,8 @@ export function searchAssets(userId, query) {
 // ---- 작업 항목(칸반) ----
 export function listWorkItems(userId, status) {
   return status
-    ? db.prepare("SELECT id,draft_id,target,destination_id,title,status,published_url,publish_mode,publish_at,updated_at FROM work_items WHERE user_id=? AND status=? ORDER BY updated_at DESC").all(uid(userId), status)
-    : db.prepare("SELECT id,draft_id,target,destination_id,title,status,published_url,publish_mode,publish_at,updated_at FROM work_items WHERE user_id=? AND status!='published' ORDER BY updated_at DESC").all(uid(userId));
+    ? db.prepare("SELECT id,draft_id,target,destination_id,title,status,published_url,published_id,publish_mode,publish_at,updated_at FROM work_items WHERE user_id=? AND status=? ORDER BY updated_at DESC").all(uid(userId), status)
+    : db.prepare("SELECT id,draft_id,target,destination_id,title,status,published_url,published_id,publish_mode,publish_at,updated_at FROM work_items WHERE user_id=? AND status!='published' ORDER BY updated_at DESC").all(uid(userId));
 }
 // 예약 발행 설정 + 실행 큐(전 사용자, 시간 도래분)
 export function setWorkPublishAt(userId, id, iso) { db.prepare("UPDATE work_items SET publish_at=?, updated_at=? WHERE user_id=? AND id=?").run(iso || null, now(), uid(userId), id); }
@@ -226,11 +227,11 @@ export function upsertWorkItem(userId, w) {
   const ex = db.prepare("SELECT id FROM work_items WHERE user_id=? AND id=?").get(uid(userId), id);
   const aj = w.article ? JSON.stringify(w.article) : (w.article_json || null);
   if (ex) {
-    db.prepare("UPDATE work_items SET target=?,destination_id=?,title=?,article_json=COALESCE(?,article_json),html=COALESCE(?,html),status=?,published_url=COALESCE(?,published_url),publish_mode=COALESCE(?,publish_mode),updated_at=? WHERE user_id=? AND id=?")
-      .run(w.target, w.destination_id || null, w.title || "", aj, w.html ?? null, w.status || "generated", w.published_url || null, w.publish_mode || null, now(), uid(userId), id);
+    db.prepare("UPDATE work_items SET target=?,destination_id=?,title=?,article_json=COALESCE(?,article_json),html=COALESCE(?,html),status=?,published_url=COALESCE(?,published_url),published_id=COALESCE(?,published_id),publish_mode=COALESCE(?,publish_mode),updated_at=? WHERE user_id=? AND id=?")
+      .run(w.target, w.destination_id || null, w.title || "", aj, w.html ?? null, w.status || "generated", w.published_url || null, w.published_id || null, w.publish_mode || null, now(), uid(userId), id);
   } else {
-    db.prepare("INSERT INTO work_items(id,user_id,draft_id,target,destination_id,title,article_json,html,status,published_url,publish_mode,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
-      .run(id, uid(userId), w.draft_id || null, w.target, w.destination_id || null, w.title || "", aj, w.html || "", w.status || "generated", w.published_url || null, w.publish_mode || null, now(), now());
+    db.prepare("INSERT INTO work_items(id,user_id,draft_id,target,destination_id,title,article_json,html,status,published_url,published_id,publish_mode,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      .run(id, uid(userId), w.draft_id || null, w.target, w.destination_id || null, w.title || "", aj, w.html || "", w.status || "generated", w.published_url || null, w.published_id || null, w.publish_mode || null, now(), now());
   }
   return id;
 }
@@ -263,5 +264,9 @@ export function dueSchedules(nowIso) {
 export function setScheduleStatus(id, status, result) {
   db.prepare("UPDATE schedules SET status=?, result=?, last_run=? WHERE id=?").run(status, (result || "").slice(0, 500), now(), id);
 }
+// 완료된 예약 자동 정리(몇 시간 뒤 사라지게)
+export function pruneDoneSchedules(cutoffIso) { db.prepare("DELETE FROM schedules WHERE status='done' AND last_run IS NOT NULL AND last_run<?").run(cutoffIso); }
+// 서버 시작 시 'running' 고착(재시작 여파) → 'pending' 복구
+export function recoverRunningSchedules() { const r = db.prepare("UPDATE schedules SET status='pending' WHERE status='running'").run(); return r.changes; }
 
 export default db;

@@ -329,12 +329,14 @@ app.post("/api/wp", async (req, res) => {
   if (!wp || !wp.site) return res.status(400).json({ error: "워드프레스 목적지가 설정되지 않았습니다(계정 관리에서 등록)." });
   if (!wp.user || !wp.pass) return res.status(400).json({ error: "이 워드프레스 계정에 사용자명/응용프로그램 비밀번호가 없습니다(계정 관리에서 입력)." });
   try {
-    const { title, content, status = "draft", category } = req.body;
+    const { title, content, status = "draft", category, postId } = req.body;   // postId 있으면 수정발행(업데이트)
     const auth = "Basic " + Buffer.from(`${wp.user}:${String(wp.pass).replace(/\s+/g, "")}`).toString("base64");
-    const postBody = { title, content, status };
+    const postBody = { title, content };
+    if (!postId) postBody.status = status;   // 신규만 status 지정(업데이트 시 기존 상태 유지)
     const catId = await wpResolveCategory(wp.site, auth, category);
     if (catId) postBody.categories = [catId];
-    const r = await fetch(`${wp.site}/wp-json/wp/v2/posts`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify(postBody) });
+    const endpoint = postId ? `${wp.site}/wp-json/wp/v2/posts/${postId}` : `${wp.site}/wp-json/wp/v2/posts`;
+    const r = await fetch(endpoint, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify(postBody) });
     const text = await r.text();
     let j = {}; try { j = JSON.parse(text); } catch {}
     if (!r.ok) {
@@ -449,14 +451,17 @@ async function bloggerAccessToken(refreshToken) {
   return j.access_token;
 }
 app.post("/api/blogger", async (req, res) => {
-  const { destinationId, title, content, isDraft } = req.body || {};
+  const { destinationId, title, content, isDraft, postId } = req.body || {};   // postId 있으면 수정발행
   const dest = destinationId ? DB.getDestination(req.userId, destinationId) : null;
   if (!dest || dest.platform !== "blogger") return res.status(400).json({ error: "블로거 계정이 아닙니다." });
   const rt = dest.creds?.refreshToken, blogId = dest.creds?.blogId;
   if (!rt || !blogId) return res.status(400).json({ error: "이 블로거 계정은 아직 '구글 연결'이 안 됐습니다." });
   try {
     const access = await bloggerAccessToken(rt);
-    const r = await fetch(`https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts/${isDraft ? "?isDraft=true" : ""}`, { method: "POST", headers: { Authorization: "Bearer " + access, "Content-Type": "application/json" }, body: JSON.stringify({ title, content }) });
+    const url = postId
+      ? `https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts/${postId}`
+      : `https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts/${isDraft ? "?isDraft=true" : ""}`;
+    const r = await fetch(url, { method: postId ? "PUT" : "POST", headers: { Authorization: "Bearer " + access, "Content-Type": "application/json" }, body: JSON.stringify(postId ? { id: postId, title, content } : { title, content }) });
     const j = await r.json(); if (!r.ok) throw new Error(j.error?.message || r.status);
     res.json({ id: j.id, link: j.url });
   } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
@@ -573,14 +578,14 @@ async function publishServer(userId, acc, { title, content, category }) {
     const catId = await wpResolveCategory(wp.site, auth, category);
     if (catId) body.categories = [catId];
     const r = await fetch(`${wp.site}/wp-json/wp/v2/posts`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    const j = await r.json(); if (!r.ok) throw new Error(j.message || r.status); return j.link;
+    const j = await r.json(); if (!r.ok) throw new Error(j.message || r.status); return { link: j.link, id: j.id };
   }
   if (acc.platform === "blogger") {
     const dest = DB.getDestination(userId, acc.id); const rt = dest?.creds?.refreshToken, blogId = dest?.creds?.blogId;
     if (!rt || !blogId) throw new Error("블로거 미연결");
     const access = await bloggerAccessToken(rt);
     const r = await fetch(`https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts/`, { method: "POST", headers: { Authorization: "Bearer " + access, "Content-Type": "application/json" }, body: JSON.stringify({ title, content }) });
-    const j = await r.json(); if (!r.ok) throw new Error(j.error?.message || r.status); return j.url;
+    const j = await r.json(); if (!r.ok) throw new Error(j.error?.message || r.status); return { link: j.url, id: j.id };
   }
   return null;
 }
@@ -614,7 +619,7 @@ async function runSchedule(s) {
     if (s.dest_id) dests = dests.filter((d) => d.id === s.dest_id);   // 특정 목적지만 지정 시
     if (!dests.length) throw new Error("목적지 계정이 없음(계정 관리에서 등록)");
     const groups = {}; dests.forEach((a) => { (groups[a.platform] = groups[a.platform] || []).push(a); });
-    const idxIn = {}; let made = 0, pub = 0;
+    const idxIn = {}; let made = 0, pub = 0, lastLink = "";
     for (const acc of dests) {
       idxIn[acc.platform] = (idxIn[acc.platform] || 0) + 1;
       const variant = { index: idxIn[acc.platform], total: groups[acc.platform].length, persona: acc.persona || "" };
@@ -634,12 +639,14 @@ async function runSchedule(s) {
       // 4) 발행 수준
       if (s.publish === "auto" && acc.has_creds) {
         try {
-          const link = await publishServer(userId, acc, { title: article.title, content: html, category: article.category });
-          if (link) { DB.upsertWorkItem(userId, { id: wid, target: acc.platform, destination_id: acc.id, title: article.title || "", status: "published", published_url: link, publish_mode: "auto" }); DB.addAsset(userId, { url: link, title: article.title, keyword, excerpt: (html || "").replace(/<[^>]+>/g, " ").slice(0, 4000) }); pub++; }
+          const pr = await publishServer(userId, acc, { title: article.title, content: html, category: article.category });
+          if (pr && pr.link) { DB.upsertWorkItem(userId, { id: wid, target: acc.platform, destination_id: acc.id, title: article.title || "", status: "published", published_url: pr.link, published_id: pr.id != null ? String(pr.id) : null, publish_mode: "scheduled" }); DB.addAsset(userId, { url: pr.link, title: article.title, keyword, excerpt: (html || "").replace(/<[^>]+>/g, " ").slice(0, 4000) }); pub++; lastLink = pr.link; }
         } catch (e) { /* 발행 실패 시 생성됨 상태로 남겨 수동 처리 */ }
       }
     }
-    DB.setScheduleStatus(s.id, "done", `목적지 ${made}개 생성${s.publish === "auto" ? ` · ${pub}개 자동발행` : " (작성완료, 수동발행 대기)"}`);
+    // 초안 소스면 원본 초안 '사용됨' 처리(초안함 정리)
+    if (made && s.source === "draft" && s.draft_id) { try { DB.setDraftStatus(userId, s.draft_id, "used"); } catch {} }
+    DB.setScheduleStatus(s.id, "done", `목적지 ${made}개 생성${s.publish === "auto" ? ` · ${pub}개 발행${lastLink ? " → " + lastLink : ""}` : " (작성완료, 수동발행 대기)"}`);
   } catch (e) { DB.setScheduleStatus(s.id, "error", String(e.message || e)); }
 }
 // 예약 발행: 생성 완료된 글을 지정 시각에 발행(WP/블로거). 네이버는 자동발행 불가 → 예약 해제.
@@ -651,10 +658,10 @@ async function publishDueWorkItem(row) {
   if (acc.platform === "naver") { DB.setWorkPublishAt(userId, row.id, null); return; }
   try {
     const article = full.article || {};
-    const link = await publishServer(userId, acc, { title: full.title, content: full.html, category: article.category });
-    if (link) {
-      DB.upsertWorkItem(userId, { id: row.id, target: row.target, destination_id: row.destination_id, title: full.title || "", status: "published", published_url: link, publish_mode: "scheduled" });
-      DB.addAsset(userId, { url: link, title: full.title, keyword: article.keyword || "", excerpt: (full.html || "").replace(/<[^>]+>/g, " ").slice(0, 4000) });
+    const pr = await publishServer(userId, acc, { title: full.title, content: full.html, category: article.category });
+    if (pr && pr.link) {
+      DB.upsertWorkItem(userId, { id: row.id, target: row.target, destination_id: row.destination_id, title: full.title || "", status: "published", published_url: pr.link, published_id: pr.id != null ? String(pr.id) : null, publish_mode: "scheduled" });
+      DB.addAsset(userId, { url: pr.link, title: full.title, keyword: article.keyword || "", excerpt: (full.html || "").replace(/<[^>]+>/g, " ").slice(0, 4000) });
     }
   } catch (e) { console.error("[work publish]", row.id, e.message); DB.setWorkPublishAt(userId, row.id, null); }  // 실패 시 예약 해제(무한 재시도 방지) — 작업보드에 남음
 }
@@ -692,10 +699,13 @@ async function checkSchedules() {
     const dueWork = DB.dueWorkPublish(nowIso); for (const w of dueWork) await publishDueWorkItem(w);   // 예약 발행 큐
     // 초안 자동 처리(설정 ON 사용자) — 이미 예약된 초안은 건너뜀(중복 방지)
     for (const d of DB.newAutoDrafts(5)) { if (DB.getSettingsRaw(d.user_id).autoProcessDrafts && !DB.draftHasSchedule(d.user_id, d.id)) await processAutoDraft(d.user_id, d); }
+    // 완료된 예약 정리(2시간 지난 done 삭제)
+    DB.pruneDoneSchedules(new Date(Date.now() - 2 * 3600 * 1000).toISOString());
   }
   catch (e) { console.error("[schedule] loop error", e); }
   finally { _schedRunning = false; }
 }
+try { const n = DB.recoverRunningSchedules(); if (n) console.log(`[schedule] 재시작 복구: 'running' ${n}건 → pending`); } catch {}   // 재시작 여파 복구
 setInterval(checkSchedules, 60000);
 setTimeout(checkSchedules, 8000);
 

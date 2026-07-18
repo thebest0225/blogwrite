@@ -45,6 +45,7 @@
                 <button class="mini primary-mini" id="wpPublishBtn"><iconify-icon icon="solar:upload-minimalistic-linear"></iconify-icon> WP 발행</button>
               </span>
               <button class="mini primary-mini hidden" id="bloggerPublishBtn"><iconify-icon icon="solar:upload-minimalistic-linear"></iconify-icon> 블로거 발행</button>
+              <button class="mini primary-mini hidden" id="updatePublishBtn"><iconify-icon icon="solar:refresh-circle-linear"></iconify-icon> 수정 발행(업데이트)</button>
               <button class="mini" id="markPublishedBtn"><iconify-icon icon="solar:check-read-linear"></iconify-icon> 발행 완료 표시</button>
             </div>
           </div>
@@ -214,7 +215,11 @@
       <section class="view hidden" data-view="history">
         <div class="view-head"><h2>발행 기록</h2><span class="muted" id="historyCount">— 발행된 모든 글을 보관·검색합니다</span><button class="mini" id="historyRefresh" style="margin-left:auto;">새로고침</button></div>
         <div class="card">
-          <div class="row"><input type="text" id="historySearch" placeholder="제목·계정 검색" /></div>
+          <div class="row" style="gap:8px;flex-wrap:wrap;">
+            <input type="text" id="historySearch" placeholder="제목 검색" style="flex:1;min-width:160px;" />
+            <select id="historyFilter" style="width:auto;"><option value="">전체 블로그</option></select>
+            <select id="historyMode" style="width:auto;"><option value="">전체 방식</option><option value="scheduled">예약발행</option><option value="auto">자동발행</option><option value="manual">수동발행</option></select>
+          </div>
           <div id="historyList" class="acc-list" style="margin-top:10px;"></div>
         </div>
       </section>

@@ -61,7 +61,7 @@ const apiTrends = (force) => apiJson(`/api/trends${force ? "?force=1" : ""}`);
 const storeList = () => apiJson("/api/store").then((j) => j.records || []);
 const storeAdd = (rec) => apiJson("/api/store", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rec) }).catch(() => {});
 const storeDelete = (url) => apiJson("/api/store/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) }).catch(() => {});
-const wpCreatePost = ({ title, content, status, destinationId, category }) => apiJson("/api/wp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, content, status, destinationId, category }) });
+const wpCreatePost = ({ title, content, status, destinationId, category, postId }) => apiJson("/api/wp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, content, status, destinationId, category, postId }) });
 const accountsApi = () => apiJson("/api/destinations").then((j) => j.destinations || []);
 const accountSave = (dst) => apiJson("/api/destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dst) });
 const accountDelete = (id) => apiJson("/api/destinations/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
@@ -116,6 +116,7 @@ async function init() {
   $("accCancel").addEventListener("click", resetAccForm);
   $("accGoogleConnect").addEventListener("click", onGoogleConnect);
   $("bloggerPublishBtn").addEventListener("click", bloggerPublish);
+  $("updatePublishBtn").addEventListener("click", updatePublish);
   $("schSource").addEventListener("change", updateSchForm);
   $("schScope").addEventListener("change", updateSchForm);
   $("schSave").addEventListener("click", onScheduleSave);
@@ -125,6 +126,8 @@ async function init() {
   $("pmCancel").addEventListener("click", cancelProgress);
   $("historyRefresh").addEventListener("click", renderHistory);
   $("historySearch").addEventListener("input", () => renderHistory());
+  $("historyFilter").addEventListener("change", () => renderHistory());
+  $("historyMode").addEventListener("change", () => renderHistory());
 
   await refreshAccounts();
   updateInboxBadge();
@@ -987,10 +990,24 @@ async function autoPublishWork(acc, wid, article, html, keyword) {
     ? await wpCreatePost({ title: article.title, content: html, status: "publish", destinationId: acc.id, category: article.category })
     : await apiJson("/api/blogger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ destinationId: acc.id, title: article.title, content: html }) });
   if (res && res.link) {
-    await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: wid, target: acc.platform, destination_id: acc.id, title: article.title || "", status: "published", published_url: res.link, publish_mode: "auto" }) }).catch(() => {});
+    await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: wid, target: acc.platform, destination_id: acc.id, title: article.title || "", status: "published", published_url: res.link, published_id: res.id != null ? String(res.id) : null, publish_mode: "auto" }) }).catch(() => {});
     try { await saveMyPost({ title: article.title, url: res.link, keyword }, (html || "").replace(/<[^>]+>/g, " ").slice(0, 4000)); } catch {}
   }
   return res;
+}
+// 이미 발행된 글을 편집 후 원격에 '수정 발행'(업데이트)
+async function updatePublish() {
+  if (!cur || !cur.published_id) return;
+  if (editMode) toggleEdit(); else rebuildCur();
+  try {
+    setStatus("수정 발행(업데이트) 중…");
+    const body = { destinationId: cur.acc.id, postId: cur.published_id, title: cur.article.title, content: cur.html };
+    const res = cur.target === "wordpress"
+      ? await wpCreatePost({ ...body, category: cur.article.category })
+      : await apiJson("/api/blogger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: cur.id, target: cur.target, destination_id: cur.acc.id, title: cur.article.title || "", article: cur.article, html: cur.html, status: "published", published_url: res.link || cur.published_url, published_id: res.id != null ? String(res.id) : cur.published_id }) }).catch(() => {});
+    setStatus(`✅ 수정 발행 완료: ${res.link || cur.published_url}`);
+  } catch (e) { setStatus("수정 발행 실패: " + e.message, true); }
 }
 async function generateAll() {
   if (!config.kieEnabled && !config.claudeEnabled) { setStatus("생성 엔진(Claude/KIE) 키가 없습니다. 설정에서 입력하세요.", true); return; }
@@ -1098,15 +1115,24 @@ async function renderHistory() {
   try { _history = await apiJson("/api/work?status=published").then((j) => j.items || []); } catch { _history = []; }
   const q = ($("historySearch").value || "").trim().toLowerCase();
   const amap = accById();
-  const items = q ? _history.filter((w) => ((w.title || "") + (amap[w.destination_id]?.name || "") + (PLAT_LABEL[w.target] || "")).toLowerCase().includes(q)) : _history;
-  $("historyCount").textContent = `— 총 ${_history.length}건 발행됨`;
+  // 블로그 필터 옵션 채우기(발행된 계정만)
+  const fsel = $("historyFilter"); const cur0 = fsel.value;
+  const usedDest = [...new Set(_history.map((w) => w.destination_id).filter(Boolean))];
+  fsel.innerHTML = '<option value="">전체 블로그</option>' + usedDest.map((id) => `<option value="${id}">${escapeHtml(amap[id]?.name || id)}</option>`).join("");
+  fsel.value = cur0;
+  const fDest = fsel.value, fMode = $("historyMode").value;
+  let items = _history;
+  if (q) items = items.filter((w) => ((w.title || "") + (amap[w.destination_id]?.name || "") + (PLAT_LABEL[w.target] || "")).toLowerCase().includes(q));
+  if (fDest) items = items.filter((w) => w.destination_id === fDest);
+  if (fMode) items = items.filter((w) => (w.publish_mode || "") === fMode);
+  $("historyCount").textContent = `— 총 ${_history.length}건 · 표시 ${items.length}건`;
   box.innerHTML = "";
-  if (!items.length) { box.innerHTML = '<div class="hist-empty">발행된 글이 없습니다.</div>'; return; }
+  if (!items.length) { box.innerHTML = '<div class="hist-empty">해당 조건의 발행 글이 없습니다.</div>'; return; }
   for (const w of items) {
     const acc = amap[w.destination_id] || { platform: w.target };
     const d = new Date(w.updated_at || Date.now());
     const dstr = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
-    const mode = w.publish_mode === "auto" ? `<span class="pubm auto">자동발행</span>` : (w.publish_mode === "manual" ? `<span class="pubm manual">수동발행</span>` : `<span class="pubm">발행됨</span>`);
+    const mode = w.publish_mode === "scheduled" ? `<span class="pubm auto">예약발행</span>` : w.publish_mode === "auto" ? `<span class="pubm auto">자동발행</span>` : (w.publish_mode === "manual" ? `<span class="pubm manual">수동발행</span>` : `<span class="pubm">발행됨</span>`);
     const row = document.createElement("div"); row.className = "acc-row";
     row.innerHTML = `${mode}`
       + `<span class="acc-plat">${PLAT_LABEL[w.target] || w.target}${acc.name ? " · " + acc.name : ""}</span>`
@@ -1127,6 +1153,12 @@ async function renderHistory() {
       setStatus("✅ 발행 주소를 수정했습니다."); renderHistory();
     });
     row.appendChild(editUrl);
+    // 우리 편집모드로 열어 수정 → '수정 발행'(업데이트)
+    if (w.published_id && (w.target === "wordpress" || w.target === "blogger")) {
+      const ed = document.createElement("button"); ed.className = "mini"; ed.innerHTML = `<iconify-icon icon="solar:pen-2-linear"></iconify-icon> 편집`;
+      ed.title = "편집모드로 열어 수정 후 재발행"; ed.addEventListener("click", () => { showView("board"); openWork(w.id); });
+      row.appendChild(ed);
+    }
     // 작업으로 되돌리기(실수로 발행표시한 경우 → 작업보드로 복귀해 재발행)
     const revert = document.createElement("button"); revert.className = "mini"; revert.innerHTML = `<iconify-icon icon="solar:undo-left-linear"></iconify-icon> 작업으로`;
     revert.title = "작업보드로 되돌리기(다시 발행)"; revert.addEventListener("click", async () => {
@@ -1143,7 +1175,7 @@ async function renderHistory() {
 async function openWork(id) {
   let w; try { w = await apiJson("/api/work/" + id); } catch { return; }
   const acc = accById()[w.destination_id] || { platform: w.target, role: "cushion", name: "" };
-  cur = { id: w.id, acc, target: w.target, article: w.article || { blocks: [] }, keyword: (w.article && w.article.keyword) || deriveTopic(), html: w.html || "", resolvedType: (w.article && w.article.type) || "", published_url: w.published_url, publish_at: w.publish_at || "" };
+  cur = { id: w.id, acc, target: w.target, article: w.article || { blocks: [] }, keyword: (w.article && w.article.keyword) || deriveTopic(), html: w.html || "", resolvedType: (w.article && w.article.type) || "", published_url: w.published_url, published_id: w.published_id || "", status: w.status || "generated", publish_at: w.publish_at || "" };
   $("workDetail").style.display = "";
   renderCur();
   $("workDetail").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1152,11 +1184,15 @@ function renderCur() {
   if (!cur) return;
   $("metaLine").textContent = `[${cur.acc.name || PLAT_LABEL[cur.target] || cur.target}] ${cur.article.title || ""}` + (cur.resolvedType ? ` · 유형:${cur.resolvedType}` : "") + (cur.article.category ? ` · 카테고리:${cur.article.category}` : "") + `\n메타: ${cur.article.metaDescription || "-"}`;
   $("preview").srcdoc = buildPreviewDoc(cur.article.title || "", cur.html);
-  $("wpActions").classList.toggle("hidden", cur.target !== "wordpress");
-  $("bloggerPublishBtn").classList.toggle("hidden", cur.target !== "blogger");
-  $("markPublishedBtn").classList.toggle("hidden", cur.target === "wordpress");
-  // 예약 발행: WP·블로거(자동발행 가능)만 노출
-  const canAuto = cur.target === "wordpress" || cur.target === "blogger";
+  const published = cur.status === "published";
+  const canUpdate = published && cur.published_id && (cur.target === "wordpress" || cur.target === "blogger");
+  // 이미 발행된 글: '수정 발행'만, 미발행: 일반 발행 버튼들
+  $("wpActions").classList.toggle("hidden", published || cur.target !== "wordpress");
+  $("bloggerPublishBtn").classList.toggle("hidden", published || cur.target !== "blogger");
+  $("markPublishedBtn").classList.toggle("hidden", published || cur.target === "wordpress");
+  $("updatePublishBtn").classList.toggle("hidden", !canUpdate);
+  // 예약 발행: 미발행 + WP·블로거만
+  const canAuto = !published && (cur.target === "wordpress" || cur.target === "blogger");
   $("schedPubRow").classList.toggle("hidden", !canAuto);
   if (canAuto) {
     $("schedPubAt").value = cur.publish_at ? toLocalInput(cur.publish_at) : "";
@@ -1467,7 +1503,7 @@ async function wpPublish(status) {
       if (status === "publish") {
         if (isDestRole(cur.acc)) $("bloggerUrl").value = res.link;   // 목적지 → 쿠션 유입 URL
         // 발행 완료 → 작업 목록에서 제거(status published)
-        await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: cur.id, target: cur.target, destination_id: cur.acc.id, title: cur.article.title || "", status: "published", published_url: res.link, publish_mode: "auto" }) }).catch(() => {});
+        await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: cur.id, target: cur.target, destination_id: cur.acc.id, title: cur.article.title || "", status: "published", published_url: res.link, published_id: res.id != null ? String(res.id) : null, publish_mode: "manual" }) }).catch(() => {});
         cur = null; $("workDetail").style.display = "none"; renderWorkList();
       }
     }
@@ -1482,7 +1518,7 @@ async function bloggerPublish() {
     const res = await apiJson("/api/blogger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ destinationId: cur.acc.id, title: cur.article.title, content: cur.html }) });
     if (res.link) {
       try { await saveMyPost({ title: cur.article.title, url: res.link, keyword: cur.keyword }, (cur.html || "").replace(/<[^>]+>/g, " ").slice(0, 4000)); } catch {}
-      await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: cur.id, target: cur.target, destination_id: cur.acc.id, title: cur.article.title || "", status: "published", published_url: res.link, publish_mode: "auto" }) }).catch(() => {});
+      await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: cur.id, target: cur.target, destination_id: cur.acc.id, title: cur.article.title || "", status: "published", published_url: res.link, published_id: res.id != null ? String(res.id) : null, publish_mode: "manual" }) }).catch(() => {});
       setStatus(`✅ 블로거 발행 완료: ${res.link}`);
       cur = null; $("workDetail").style.display = "none"; renderWorkList();
     }
