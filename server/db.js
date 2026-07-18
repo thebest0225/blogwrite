@@ -88,7 +88,7 @@ const now = () => new Date().toISOString();
 const rid = (p) => p + Date.now().toString(36) + crypto.randomBytes(3).toString("hex");
 
 // ---- 설정 (민감키는 암호화 저장, 반환 시 존재여부만/복호화는 서버 내부용) ----
-const SECRET_FIELDS = ["anthropicKey", "kieKey", "naverClientId", "naverClientSecret", "pexelsKey"];
+const SECRET_FIELDS = ["anthropicKey", "kieKey", "naverClientId", "naverClientSecret", "pexelsKey", "tgBotToken"];
 export function getSettingsRaw(userId) {
   const row = db.prepare("SELECT json FROM settings WHERE user_id=?").get(uid(userId));
   let s = {}; try { s = row ? JSON.parse(row.json) : {}; } catch {}

@@ -7,6 +7,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import * as DB from "./db.js";
+import { tgMsg, tgEsc } from "./notify.js";
 import { buildDraftPrompt, buildBloggerMain } from "./public/lib/prompts.js";
 import { buildHtml } from "./public/lib/html-builder.js";
 
@@ -358,6 +359,7 @@ app.post("/api/wp", async (req, res) => {
       if (!postId) return res.status(400).json({ error: "원격 글을 찾지 못했습니다(URL로 매칭 실패). 새 글로 발행하거나 URL을 확인하세요." });
     }
     const postBody = { title, content };
+    if (String(wp.site).includes("oguonline.com")) postBody.meta = { _ogu_src: "blogwrite" };   // 오구 알림 출처 태그
     if (!postId) postBody.status = status;   // 신규만 status 지정(업데이트 시 기존 상태 유지)
     const catId = await wpResolveCategory(wp.site, auth, category);
     if (catId) postBody.categories = [catId];
@@ -583,10 +585,25 @@ const SETTINGS_DEFAULTS = {
   linkMode: "preserve", myBlogUrl: "", defaultTone: "친근하고 신뢰감 있는",
   defaultAudience: "관련 정보를 처음 찾아보는 일반 독자",
   authorBio: "여러 분야의 정보를 직접 찾아보고, 최신 자료와 공식 출처를 확인해 이해하기 쉽게 정리합니다. 검색만으로는 흩어져 있던 내용을 한곳에 모아, 실제로 도움이 되는 알맹이만 담으려 합니다.",
-  adEnabled: false, adCode: "", internalLinks: false, generateImages: true, imageCount: 1
+  adEnabled: false, adCode: "", internalLinks: false, generateImages: true, imageCount: 1,
+  // 초안 다중 목적지 매칭
+  autoMultiMatch: true, autoMultiMax: 0,
+  // 텔레그램 알림
+  tgEnabled: false, tgChatId: "", tgOnDraft: true, tgOnGenerate: true, tgOnPublish: true, tgOnSchedule: true, tgOnError: true
 };
 app.get("/api/settings", (req, res) => res.json({ ...SETTINGS_DEFAULTS, ...DB.getSettings(req.userId) }));
 app.post("/api/settings", (req, res) => res.json({ ok: true, settings: { ...SETTINGS_DEFAULTS, ...DB.saveSettings(req.userId, req.body || {}) } }));
+// 텔레그램 테스트 발송(현재 저장된 봇/챗ID로)
+app.post("/api/telegram/test", async (req, res) => {
+  const st = DB.getSettingsRaw(req.userId);
+  const token = DB.getSecret(req.userId, "tgBotToken"), chatId = st.tgChatId;
+  if (!token || !chatId) return res.status(400).json({ error: "봇 토큰과 Chat ID를 먼저 저장하세요." });
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: "🔔 블로그라이터 알림 테스트 — 정상 연결되었습니다." }) });
+    const j = await r.json(); if (!r.ok || !j.ok) throw new Error(j.description || r.status);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: "발송 실패: " + String(e.message || e) }); }
+});
 
 // ---- 프론트용 상태(사용자별) ----
 app.get("/api/config", (req, res) => {
@@ -707,14 +724,16 @@ async function runSchedule(s) {
       if (s.publish === "auto" && acc.has_creds) {
         try {
           const pr = await publishServer(userId, acc, { title: article.title, content: html, category: article.category });
-          if (pr && pr.link) { DB.upsertWorkItem(userId, { id: wid, target: acc.platform, destination_id: acc.id, title: article.title || "", status: "published", published_url: pr.link, published_id: pr.id != null ? String(pr.id) : null, publish_mode: "scheduled" }); DB.addAsset(userId, { url: pr.link, title: article.title, keyword, excerpt: (html || "").replace(/<[^>]+>/g, " ").slice(0, 4000) }); pub++; lastLink = pr.link; }
-        } catch (e) { /* 발행 실패 시 생성됨 상태로 남겨 수동 처리 */ }
+          if (pr && pr.link) { DB.upsertWorkItem(userId, { id: wid, target: acc.platform, destination_id: acc.id, title: article.title || "", status: "published", published_url: pr.link, published_id: pr.id != null ? String(pr.id) : null, publish_mode: "scheduled" }); DB.addAsset(userId, { url: pr.link, title: article.title, keyword, excerpt: (html || "").replace(/<[^>]+>/g, " ").slice(0, 4000) }); pub++; lastLink = pr.link; tgMsg(userId, "publish", [`✅ 예약발행 완료 · <b>${tgEsc(acc.name || acc.platform)}</b>`, `📝 ${tgEsc(article.title)}`, `🔗 ${tgEsc(pr.link)}`]); }
+        } catch (e) { tgMsg(userId, "error", [`❌ 예약발행 실패 · <b>${tgEsc(acc.name || acc.platform)}</b>`, `📝 ${tgEsc(article.title)}`, `⚠️ ${tgEsc(e.message || e)}`]); }
       }
     }
     // 초안 소스면 원본 초안 '사용됨' 처리(초안함 정리)
     if (made && s.source === "draft" && s.draft_id) { try { DB.setDraftStatus(userId, s.draft_id, "used"); } catch {} }
-    DB.setScheduleStatus(s.id, "done", `목적지 ${made}개 생성${s.publish === "auto" ? ` · ${pub}개 발행${lastLink ? " → " + lastLink : ""}` : " (작성완료, 수동발행 대기)"}`);
-  } catch (e) { DB.setScheduleStatus(s.id, "error", String(e.message || e)); }
+    const summary = `목적지 ${made}개 생성${s.publish === "auto" ? ` · ${pub}개 발행${lastLink ? " → " + lastLink : ""}` : " (작성완료, 수동발행 대기)"}`;
+    DB.setScheduleStatus(s.id, "done", summary);
+    tgMsg(userId, "schedule", [`📅 예약작업 완료 · <b>${tgEsc(keyword || "")}</b>`, tgEsc(summary)]);
+  } catch (e) { DB.setScheduleStatus(s.id, "error", String(e.message || e)); tgMsg(userId, "error", [`❌ 예약작업 실패`, `⚠️ ${tgEsc(e.message || e)}`]); }
 }
 // 예약 발행: 생성 완료된 글을 지정 시각에 발행(WP/블로거). 네이버는 자동발행 불가 → 예약 해제.
 async function publishDueWorkItem(row) {
@@ -729,8 +748,9 @@ async function publishDueWorkItem(row) {
     if (pr && pr.link) {
       DB.upsertWorkItem(userId, { id: row.id, target: row.target, destination_id: row.destination_id, title: full.title || "", status: "published", published_url: pr.link, published_id: pr.id != null ? String(pr.id) : null, publish_mode: "scheduled" });
       DB.addAsset(userId, { url: pr.link, title: full.title, keyword: article.keyword || "", excerpt: (full.html || "").replace(/<[^>]+>/g, " ").slice(0, 4000) });
+      tgMsg(userId, "publish", [`✅ 예약발행 완료 · <b>${tgEsc(acc.name || acc.platform)}</b>`, `📝 ${tgEsc(full.title)}`, `🔗 ${tgEsc(pr.link)}`]);
     }
-  } catch (e) { console.error("[work publish]", row.id, e.message); DB.setWorkPublishAt(userId, row.id, null); }  // 실패 시 예약 해제(무한 재시도 방지) — 작업보드에 남음
+  } catch (e) { console.error("[work publish]", row.id, e.message); DB.setWorkPublishAt(userId, row.id, null); tgMsg(userId, "error", [`❌ 예약발행 실패 · <b>${tgEsc(acc.name || acc.platform)}</b>`, `📝 ${tgEsc(full.title)}`, `⚠️ ${tgEsc(e.message || e)}`]); }  // 실패 시 예약 해제(무한 재시도 방지) — 작업보드에 남음
 }
 // 초안 자동 처리: 들어온 초안 → 니치 매칭 목적지 글 생성 → 작업보드(발행 안 함)
 const topicScore = (acc, text) => { const ts = (acc.topics || "").split(/[,\n]/).map((t) => t.trim().toLowerCase()).filter((t) => t.length >= 2); let s = 0; for (const t of ts) if (text.includes(t)) s++; return s; };
@@ -742,21 +762,32 @@ async function processAutoDraft(userId, draft) {
   const text = ((draft.keyword || "") + " " + (draft.title || "")).toLowerCase();
   const scored = dests.map((a) => ({ a, s: topicScore(a, text) })).filter((x) => x.s > 0).sort((x, y) => y.s - x.s);
   if (!scored.length) return;   // 니치 매칭 없으면 자동처리 안 함(수동으로 두기)
-  const acc = scored[0].a;      // 가장 잘 맞는 목적지 1곳
+  // 다중 매칭: 기본 ON이면 니치가 맞는 목적지 '모두'에 각각 글 작성. OFF면 가장 잘 맞는 1곳만.
+  const multi = st.autoMultiMatch !== false;
+  // 상한(과다 생성 방지): autoMultiMax(기본 0=무제한)
+  const cap = parseInt(st.autoMultiMax, 10) || 0;
+  let list = multi ? scored.map((x) => x.a) : [scored[0].a];
+  if (multi && cap > 0) list = list.slice(0, cap);
   DB.setDraftStatus(userId, draft.id, "used");   // 먼저 소비(중복처리 방지)
-  try {
-    const today = new Date().toISOString().slice(0, 10);
-    const keyword = draft.keyword || firstLine(draft.content);
-    const ov = acc.overrides || {};
-    const built = buildBloggerMain({ sourceText: draft.content || "", keyword, audience: ov.audience || st.defaultAudience, tone: ov.tone || st.defaultTone, authorBio: ov.authorBio || st.authorBio, today, imageCount: 1, reference: "", internalLinks: [], variant: { persona: acc.persona || "" } });
-    let content = "";
-    for (let attempt = 0; attempt < 2 && !content; attempt++) { try { content = await kieChat({ system: built.system, user: built.user, maxTokens: 16000, temperature: 0.8, model: CHAT_MODEL, prefillJson: true, apiKey: kKey }); } catch (e) { if (attempt) throw e; await sleep(1200); } }
-    const article = parseArticle(content); if (!article) throw new Error("파싱 실패");
-    article.today = today; article.keyword = keyword; const abio = ov.authorBio || st.authorBio; if (abio) article.authorBio = abio;
-    try { await genArticleImagesServer(article, kKey, ov.thumbStyle || st.thumbnailStylePrompt); } catch {}
-    const html = buildHtml(article, { accent: st.overlayAccent || "#e11d48", linkMode: st.linkMode || "preserve", adEnabled: st.adEnabled, adCode: st.adCode }).html;
-    DB.upsertWorkItem(userId, { draft_id: draft.id, target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated" });
-  } catch (e) { console.error("[auto-draft]", draft.id, e.message); }   // 실패해도 소비됨(재제출 가능)
+  const today = new Date().toISOString().slice(0, 10);
+  const keyword = draft.keyword || firstLine(draft.content);
+  let made = 0;
+  for (const acc of list) {
+    try {
+      const ov = acc.overrides || {};
+      const variant = { persona: acc.persona || "", index: made + 1, total: list.length };
+      const built = buildBloggerMain({ sourceText: draft.content || "", keyword, audience: ov.audience || st.defaultAudience, tone: ov.tone || st.defaultTone, authorBio: ov.authorBio || st.authorBio, today, imageCount: 1, reference: "", internalLinks: [], variant });
+      let content = "";
+      for (let attempt = 0; attempt < 2 && !content; attempt++) { try { content = await kieChat({ system: built.system, user: built.user, maxTokens: 16000, temperature: 0.8, model: CHAT_MODEL, prefillJson: true, apiKey: kKey }); } catch (e) { if (attempt) throw e; await sleep(1200); } }
+      const article = parseArticle(content); if (!article) throw new Error("파싱 실패");
+      article.today = today; article.keyword = keyword; const abio = ov.authorBio || st.authorBio; if (abio) article.authorBio = abio;
+      try { await genArticleImagesServer(article, kKey, ov.thumbStyle || st.thumbnailStylePrompt); } catch {}
+      const html = buildHtml(article, { accent: st.overlayAccent || "#e11d48", linkMode: st.linkMode || "preserve", adEnabled: st.adEnabled, adCode: st.adCode }).html;
+      DB.upsertWorkItem(userId, { draft_id: draft.id, target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated" });
+      made++;
+      tgMsg(userId, "generate", [`✍️ 초안 자동생성 완료 · <b>${tgEsc(acc.name || acc.platform)}</b>${list.length > 1 ? ` (${made}/${list.length})` : ""}`, `📝 ${tgEsc(article.title)}`, `작업보드에서 확인 후 발행하세요.`]);
+    } catch (e) { console.error("[auto-draft]", draft.id, acc.id, e.message); tgMsg(userId, "error", [`❌ 초안 자동생성 실패 · <b>${tgEsc(acc.name || acc.platform)}</b>`, `📥 ${tgEsc(draft.title || draft.keyword || draft.id)}`, `⚠️ ${tgEsc(e.message || e)}`]); }
+  }   // 실패해도 초안은 소비됨(재제출 가능)
 }
 const AUTO_INTERVAL = parseInt(process.env.AUTO_PROCESS_INTERVAL_MS, 10) || 10 * 60 * 1000;  // 초안 자동처리 간격(기본 10분)
 let _lastAutoAt = Date.now();   // 시작 후 첫 처리는 약 10분 뒤부터

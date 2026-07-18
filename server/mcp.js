@@ -11,6 +11,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { spawn } from "child_process";
+import { tgMsg, tgEsc } from "./notify.js";
 import * as DB from "./db.js";
 
 const OGU_NEWS_DIR = process.env.OGU_NEWS_DIR || "/var/www/oguonline-news";
@@ -77,6 +78,7 @@ function buildServer(userId) {
       const rec = DB.addDraft(userId, { title, content, keyword, source: "mcp" });
       let routed = "";
       if (rec.dest_id) { const d = DB.getDestination(userId, rec.dest_id); if (d) routed = ` → 니치 자동 배분: ${d.name}`; }
+      try { tgMsg(userId, "draft", [`📥 새 초안 도착`, `📝 ${tgEsc(title || keyword || rec.id)}`, `초안함에서 확인하세요.`]); } catch {}
       return { content: [{ type: "text", text: `✅ 초안함에 저장됨 (id: ${rec.id})${routed}. 블로그라이터 웹앱(write.mangois.love)에서 가공·발행하세요.` }] };
     }
   );

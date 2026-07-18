@@ -265,6 +265,24 @@
           <div class="opt-sec"><iconify-icon icon="solar:rocket-2-bold-duotone"></iconify-icon> 자동발행</div>
           <label class="check"><input type="checkbox" id="optAutoProcessDrafts" /><span><b>초안 자동 처리</b> — 초안함에 들어온 초안(MCP·AI초안)을 니치 맞는 목적지 글로 <b>자동 생성해 작업보드에 올림</b>(발행은 안 함). 당신은 작업보드부터 검토·발행만 하면 됩니다.</span></label>
           <label class="check"><input type="checkbox" id="optAutoPublish" /><span>초안이 준비되면 <b>목적지 글을 자동 생성 + 자동발행</b> (부재중용). <b>워드프레스·블로거</b>(연결됨)는 자동발행, <b>네이버</b>만 자동발행 불가라 작업보드에 남아 HTML 수동 발행.</span></label>
+          <label class="check"><input type="checkbox" id="optAutoMultiMatch" /><span><b>다중 목적지 매칭</b> — 초안 니치와 맞는 목적지가 여러 곳이면 <b>각 목적지마다 글을 따로 생성</b>. 끄면 가장 잘 맞는 1곳만.</span></label>
+          <label class="field" style="max-width:280px;"><span>다중 매칭 최대 개수 <span class="muted">(0=제한 없음)</span></span><input type="number" id="optAutoMultiMax" min="0" step="1" value="0" /></label>
+
+          <div class="opt-sec"><iconify-icon icon="solar:bell-bing-bold-duotone"></iconify-icon> 텔레그램 알림 <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;">— 망고허브와 같은 봇 사용. 초안 유입·생성·발행·예약실행·오류를 알림.</span></div>
+          <label class="check"><input type="checkbox" id="optTgEnabled" /><span><b>텔레그램 알림 사용</b></span></label>
+          <div class="grid2">
+            <label class="field"><span>봇 토큰 <span class="muted">(비우면 유지)</span></span><input type="password" id="optTgBotToken" placeholder="예: 8215466645:AA..." autocomplete="off" /></label>
+            <label class="field"><span>Chat ID</span><input type="text" id="optTgChatId" placeholder="예: 7076008136" /></label>
+          </div>
+          <div class="row" style="gap:14px;flex-wrap:wrap;font-size:13px;">
+            <label class="check" style="margin:0;"><input type="checkbox" id="optTgOnDraft" /><span>📥 초안 도착</span></label>
+            <label class="check" style="margin:0;"><input type="checkbox" id="optTgOnGenerate" /><span>✍️ 목적지 생성</span></label>
+            <label class="check" style="margin:0;"><input type="checkbox" id="optTgOnPublish" /><span>✅ 발행</span></label>
+            <label class="check" style="margin:0;"><input type="checkbox" id="optTgOnSchedule" /><span>📅 예약 실행</span></label>
+            <label class="check" style="margin:0;"><input type="checkbox" id="optTgOnError" /><span>❌ 오류/실패</span></label>
+          </div>
+          <div class="row" style="justify-content:flex-start;"><button class="mini" id="tgTestBtn"><iconify-icon icon="solar:paper-plane-linear"></iconify-icon> 테스트 발송</button></div>
+
           <div class="opt-sec"><iconify-icon icon="solar:global-linear"></iconify-icon> 전역 기본값 <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0;">— 계정별 설정이 비어있을 때 사용됩니다(블로그마다 다르게 하려면 계정 관리에서 설정)</span></div>
           <label class="field"><span>내 블로그/사이트 (기본 목적지)</span><input type="text" id="optMyBlog" /></label>
           <div class="grid2">

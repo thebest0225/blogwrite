@@ -123,6 +123,7 @@ async function init() {
   $("schSave").addEventListener("click", onScheduleSave);
   $("schCancel").addEventListener("click", resetSchForm);
   $("optSave").addEventListener("click", onSaveOptions);
+  $("tgTestBtn").addEventListener("click", onTgTest);
   $("pmClose").addEventListener("click", closeProgress);
   $("pmCancel").addEventListener("click", cancelProgress);
   $("historyRefresh").addEventListener("click", renderHistory);
@@ -551,6 +552,16 @@ function populateSettings() {
   $("optAutoPublish").checked = !!settings.autoPublish;
   $("optAutoProcessDrafts").checked = !!settings.autoProcessDrafts;
   $("optAdCode").value = settings.adCode || "";
+  $("optAutoMultiMatch").checked = settings.autoMultiMatch !== false;
+  $("optAutoMultiMax").value = settings.autoMultiMax != null ? settings.autoMultiMax : 0;
+  $("optTgEnabled").checked = !!settings.tgEnabled;
+  $("optTgChatId").value = settings.tgChatId || "";
+  $("optTgBotToken").placeholder = settings.hasTgBotToken ? "저장됨 (변경 시에만 입력)" : "예: 8215466645:AA...";
+  $("optTgOnDraft").checked = settings.tgOnDraft !== false;
+  $("optTgOnGenerate").checked = settings.tgOnGenerate !== false;
+  $("optTgOnPublish").checked = settings.tgOnPublish !== false;
+  $("optTgOnSchedule").checked = settings.tgOnSchedule !== false;
+  $("optTgOnError").checked = settings.tgOnError !== false;
 }
 async function onSaveOptions() {
   const patch = {
@@ -565,10 +576,24 @@ async function onSaveOptions() {
     linkMode: $("optLinkMode").value, overlayAccent: $("optAccent").value, myBlogUrl: $("optMyBlog").value.trim(),
     defaultTone: $("optTone").value.trim(), defaultAudience: $("optAudience").value.trim(), authorBio: $("optAuthorBio").value.trim(),
     thumbnailStylePrompt: $("optThumbStyle").value.trim(), adEnabled: $("optAdEnabled").checked, adCode: $("optAdCode").value.trim(),
-    autoPublish: $("optAutoPublish").checked, stockPhotos: $("optStockPhotos").checked, autoProcessDrafts: $("optAutoProcessDrafts").checked
+    autoPublish: $("optAutoPublish").checked, stockPhotos: $("optStockPhotos").checked, autoProcessDrafts: $("optAutoProcessDrafts").checked,
+    autoMultiMatch: $("optAutoMultiMatch").checked, autoMultiMax: parseInt($("optAutoMultiMax").value, 10) || 0,
+    tgEnabled: $("optTgEnabled").checked, tgChatId: $("optTgChatId").value.trim(),
+    ...($("optTgBotToken").value.trim() ? { tgBotToken: $("optTgBotToken").value.trim() } : {}),
+    tgOnDraft: $("optTgOnDraft").checked, tgOnGenerate: $("optTgOnGenerate").checked, tgOnPublish: $("optTgOnPublish").checked, tgOnSchedule: $("optTgOnSchedule").checked, tgOnError: $("optTgOnError").checked
   };
   try { await saveSettings(patch); settings = await getSettings(); try { config = await apiJson("/api/config"); } catch {} $("apiWarn").classList.toggle("hidden", !!config.kieEnabled || !!config.claudeEnabled); populateSettings(); setStatus("✅ 설정 저장됨"); }
   catch (e) { setStatus("설정 저장 실패: " + e.message, true); }
+}
+async function onTgTest() {
+  // 테스트 전에 현재 입력값 저장(토큰/챗ID 반영)
+  const patch = { tgEnabled: $("optTgEnabled").checked, tgChatId: $("optTgChatId").value.trim(), ...($("optTgBotToken").value.trim() ? { tgBotToken: $("optTgBotToken").value.trim() } : {}) };
+  try {
+    await saveSettings(patch); settings = await getSettings(); populateSettings();
+    setStatus("테스트 발송 중…");
+    await apiJson("/api/telegram/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    setStatus("✅ 텔레그램 테스트 발송됨. 봇 대화방을 확인하세요.");
+  } catch (e) { setStatus("테스트 발송 실패: " + e.message, true); }
 }
 
 // ---------- 트렌드 ----------
