@@ -61,7 +61,7 @@ const apiTrends = (force) => apiJson(`/api/trends${force ? "?force=1" : ""}`);
 const storeList = () => apiJson("/api/store").then((j) => j.records || []);
 const storeAdd = (rec) => apiJson("/api/store", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rec) }).catch(() => {});
 const storeDelete = (url) => apiJson("/api/store/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) }).catch(() => {});
-const wpCreatePost = ({ title, content, status, destinationId, category, postId }) => apiJson("/api/wp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, content, status, destinationId, category, postId }) });
+const wpCreatePost = ({ title, content, status, destinationId, category, postId, postUrl }) => apiJson("/api/wp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, content, status, destinationId, category, postId, postUrl }) });
 const accountsApi = () => apiJson("/api/destinations").then((j) => j.destinations || []);
 const accountSave = (dst) => apiJson("/api/destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dst) });
 const accountDelete = (id) => apiJson("/api/destinations/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
@@ -997,15 +997,16 @@ async function autoPublishWork(acc, wid, article, html, keyword) {
 }
 // 이미 발행된 글을 편집 후 원격에 '수정 발행'(업데이트)
 async function updatePublish() {
-  if (!cur || !cur.published_id) return;
+  if (!cur || (!cur.published_id && !cur.published_url)) return;
   if (editMode) toggleEdit(); else rebuildCur();
   try {
     setStatus("수정 발행(업데이트) 중…");
-    const body = { destinationId: cur.acc.id, postId: cur.published_id, title: cur.article.title, content: cur.html };
+    const body = { destinationId: cur.acc.id, postId: cur.published_id || undefined, postUrl: cur.published_url || undefined, title: cur.article.title, content: cur.html };
     const res = cur.target === "wordpress"
       ? await wpCreatePost({ ...body, category: cur.article.category })
       : await apiJson("/api/blogger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: cur.id, target: cur.target, destination_id: cur.acc.id, title: cur.article.title || "", article: cur.article, html: cur.html, status: "published", published_url: res.link || cur.published_url, published_id: res.id != null ? String(res.id) : cur.published_id }) }).catch(() => {});
+    cur.published_id = res.id != null ? String(res.id) : cur.published_id;
+    await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: cur.id, target: cur.target, destination_id: cur.acc.id, title: cur.article.title || "", article: cur.article, html: cur.html, status: "published", published_url: res.link || cur.published_url, published_id: cur.published_id || null }) }).catch(() => {});
     setStatus(`✅ 수정 발행 완료: ${res.link || cur.published_url}`);
   } catch (e) { setStatus("수정 발행 실패: " + e.message, true); }
 }
@@ -1153,8 +1154,8 @@ async function renderHistory() {
       setStatus("✅ 발행 주소를 수정했습니다."); renderHistory();
     });
     row.appendChild(editUrl);
-    // 우리 편집모드로 열어 수정 → '수정 발행'(업데이트)
-    if (w.published_id && (w.target === "wordpress" || w.target === "blogger")) {
+    // 우리 편집모드로 열어 수정 → '수정 발행'(업데이트). URL만 있어도 원격 ID 역추적으로 편집 가능
+    if ((w.published_id || w.published_url) && (w.target === "wordpress" || w.target === "blogger")) {
       const ed = document.createElement("button"); ed.className = "mini"; ed.innerHTML = `<iconify-icon icon="solar:pen-2-linear"></iconify-icon> 편집`;
       ed.title = "편집모드로 열어 수정 후 재발행"; ed.addEventListener("click", () => { showView("board"); openWork(w.id); });
       row.appendChild(ed);
@@ -1185,7 +1186,7 @@ function renderCur() {
   $("metaLine").textContent = `[${cur.acc.name || PLAT_LABEL[cur.target] || cur.target}] ${cur.article.title || ""}` + (cur.resolvedType ? ` · 유형:${cur.resolvedType}` : "") + (cur.article.category ? ` · 카테고리:${cur.article.category}` : "") + `\n메타: ${cur.article.metaDescription || "-"}`;
   $("preview").srcdoc = buildPreviewDoc(cur.article.title || "", cur.html);
   const published = cur.status === "published";
-  const canUpdate = published && cur.published_id && (cur.target === "wordpress" || cur.target === "blogger");
+  const canUpdate = published && (cur.published_id || cur.published_url) && (cur.target === "wordpress" || cur.target === "blogger");
   // 이미 발행된 글: '수정 발행'만, 미발행: 일반 발행 버튼들
   $("wpActions").classList.toggle("hidden", published || cur.target !== "wordpress");
   $("bloggerPublishBtn").classList.toggle("hidden", published || cur.target !== "blogger");

@@ -329,8 +329,18 @@ app.post("/api/wp", async (req, res) => {
   if (!wp || !wp.site) return res.status(400).json({ error: "워드프레스 목적지가 설정되지 않았습니다(계정 관리에서 등록)." });
   if (!wp.user || !wp.pass) return res.status(400).json({ error: "이 워드프레스 계정에 사용자명/응용프로그램 비밀번호가 없습니다(계정 관리에서 입력)." });
   try {
-    const { title, content, status = "draft", category, postId } = req.body;   // postId 있으면 수정발행(업데이트)
+    const { title, content, status = "draft", category, postUrl } = req.body;   // postId/postUrl 있으면 수정발행
+    let { postId } = req.body;
     const auth = "Basic " + Buffer.from(`${wp.user}:${String(wp.pass).replace(/\s+/g, "")}`).toString("base64");
+    // postId 없고 URL만 있으면 slug로 원격 글 ID 역추적(옛 발행글 편집)
+    if (!postId && postUrl) {
+      try {
+        const slug = decodeURIComponent(String(postUrl).replace(/\/+$/, "").split("/").pop() || "");
+        const sr = await fetch(`${wp.site}/wp-json/wp/v2/posts?slug=${encodeURIComponent(slug)}&status=any`, { headers: { Authorization: auth } });
+        const arr = await sr.json(); if (Array.isArray(arr) && arr[0]) postId = arr[0].id;
+      } catch {}
+      if (!postId) return res.status(400).json({ error: "원격 글을 찾지 못했습니다(URL로 매칭 실패). 새 글로 발행하거나 URL을 확인하세요." });
+    }
     const postBody = { title, content };
     if (!postId) postBody.status = status;   // 신규만 status 지정(업데이트 시 기존 상태 유지)
     const catId = await wpResolveCategory(wp.site, auth, category);
@@ -451,13 +461,23 @@ async function bloggerAccessToken(refreshToken) {
   return j.access_token;
 }
 app.post("/api/blogger", async (req, res) => {
-  const { destinationId, title, content, isDraft, postId } = req.body || {};   // postId 있으면 수정발행
+  const { destinationId, title, content, isDraft, postUrl } = req.body || {};   // postId/postUrl 있으면 수정발행
+  let { postId } = req.body;
   const dest = destinationId ? DB.getDestination(req.userId, destinationId) : null;
   if (!dest || dest.platform !== "blogger") return res.status(400).json({ error: "블로거 계정이 아닙니다." });
   const rt = dest.creds?.refreshToken, blogId = dest.creds?.blogId;
   if (!rt || !blogId) return res.status(400).json({ error: "이 블로거 계정은 아직 '구글 연결'이 안 됐습니다." });
   try {
     const access = await bloggerAccessToken(rt);
+    // postId 없고 URL만 있으면 path로 원격 글 ID 역추적(옛 발행글 편집)
+    if (!postId && postUrl) {
+      try {
+        const p = new URL(postUrl).pathname;
+        const br = await fetch(`https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts/bypath?path=${encodeURIComponent(p)}`, { headers: { Authorization: "Bearer " + access } });
+        const bj = await br.json(); if (bj && bj.id) postId = bj.id;
+      } catch {}
+      if (!postId) return res.status(400).json({ error: "원격 글을 찾지 못했습니다(URL 매칭 실패)." });
+    }
     const url = postId
       ? `https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts/${postId}`
       : `https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts/${isDraft ? "?isDraft=true" : ""}`;
@@ -690,6 +710,8 @@ async function processAutoDraft(userId, draft) {
     DB.upsertWorkItem(userId, { draft_id: draft.id, target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated" });
   } catch (e) { console.error("[auto-draft]", draft.id, e.message); }   // 실패해도 소비됨(재제출 가능)
 }
+const AUTO_INTERVAL = parseInt(process.env.AUTO_PROCESS_INTERVAL_MS, 10) || 10 * 60 * 1000;  // 초안 자동처리 간격(기본 10분)
+let _lastAutoAt = Date.now();   // 시작 후 첫 처리는 약 10분 뒤부터
 let _schedRunning = false;
 async function checkSchedules() {
   if (_schedRunning) return; _schedRunning = true;
@@ -697,8 +719,12 @@ async function checkSchedules() {
     const nowIso = new Date().toISOString();
     const due = DB.dueSchedules(nowIso); for (const s of due) await runSchedule(s);
     const dueWork = DB.dueWorkPublish(nowIso); for (const w of dueWork) await publishDueWorkItem(w);   // 예약 발행 큐
-    // 초안 자동 처리(설정 ON 사용자) — 이미 예약된 초안은 건너뜀(중복 방지)
-    for (const d of DB.newAutoDrafts(5)) { if (DB.getSettingsRaw(d.user_id).autoProcessDrafts && !DB.draftHasSchedule(d.user_id, d.id)) await processAutoDraft(d.user_id, d); }
+    // 초안 자동 처리 — 부하 방지: 10분 간격으로 '하나씩' 순차 처리(예약분은 별개). 새 초안은 뒤에 줄서서 순서대로.
+    if (Date.now() - _lastAutoAt >= AUTO_INTERVAL) {
+      for (const d of DB.newAutoDrafts(1)) {
+        if (DB.getSettingsRaw(d.user_id).autoProcessDrafts && !DB.draftHasSchedule(d.user_id, d.id)) { await processAutoDraft(d.user_id, d); _lastAutoAt = Date.now(); }
+      }
+    }
     // 완료된 예약 정리(2시간 지난 done 삭제)
     DB.pruneDoneSchedules(new Date(Date.now() - 2 * 3600 * 1000).toISOString());
   }
