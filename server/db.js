@@ -185,8 +185,10 @@ export function addDraft(userId, d) {
 }
 export function deleteDraft(userId, id) { db.prepare("DELETE FROM drafts WHERE user_id=? AND id=?").run(uid(userId), id); }
 export function setDraftStatus(userId, id, status) { db.prepare("UPDATE drafts SET status=? WHERE user_id=? AND id=?").run(status, uid(userId), id); }
-// 자동 처리 대상: 들어온(mcp/ai) 새 초안 (전 사용자, 소량씩)
-export function newAutoDrafts(limit = 5) { return db.prepare("SELECT * FROM drafts WHERE status='new' AND source IN ('mcp','ai-draft') ORDER BY date LIMIT ?").all(limit); }
+// 자동 처리 대상: 들어온(mcp/ai) 새 초안 (전 사용자, 소량씩) — 예약(대기/실행/완료)에 물린 초안은 SQL에서 제외
+export function newAutoDrafts(limit = 5) {
+  return db.prepare("SELECT d.* FROM drafts d WHERE d.status='new' AND d.source IN ('mcp','ai-draft') AND NOT EXISTS (SELECT 1 FROM schedules s WHERE s.draft_id=d.id AND s.status IN ('pending','running','done')) ORDER BY d.date LIMIT ?").all(limit);
+}
 // 이 초안이 예약(대기/실행중)에 이미 물려있나 → 자동처리 중복 방지
 export function draftHasSchedule(userId, draftId) { return !!db.prepare("SELECT 1 FROM schedules WHERE user_id=? AND draft_id=? AND status IN ('pending','running') LIMIT 1").get(uid(userId), draftId); }
 
