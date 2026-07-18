@@ -770,7 +770,7 @@ async function processAutoDraft(userId, draft) {
   let list;
   if (multi) {
     const top = scored[0].s;
-    const thr = Math.max(2, top * 0.5);   // 최상위는 항상 포함, 나머지는 임계값 이상만
+    const thr = Math.max(3, top * 0.6);   // 최상위는 항상 포함, 추가 목적지는 '충분히 강한' 매칭만(경계 오탐 방지)
     list = scored.filter((x, i) => i === 0 || x.s >= thr).map((x) => x.a);
     if (cap > 0) list = list.slice(0, cap);
   } else {
