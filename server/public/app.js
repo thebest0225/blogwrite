@@ -99,6 +99,9 @@ async function init() {
   $("copyBtn").addEventListener("click", onCopy);
   $("publishBtn").addEventListener("click", publishCur);
   $("markPublishedBtn").addEventListener("click", onMarkPublished);
+  $("cushGenBtn").addEventListener("click", generateCushions);
+  $("cushRefresh").addEventListener("click", renderCushion);
+  $("cushSrcSelect").addEventListener("change", onCushSrcChange);
   $("schedPubSet").addEventListener("click", onSchedulePublishSet);
   $("schedPubClear").addEventListener("click", onSchedulePublishClear);
   $("workBack").addEventListener("click", () => { cur = null; $("workDetail").style.display = "none"; });
@@ -163,6 +166,7 @@ function showView(name) {
   else if (name === "assets") renderMyPosts();
   else if (name === "schedule") { renderSchedules(); renderTopics(); $("draftGuide").value = settings.draftGuide || ""; }
   else if (name === "new") { setGenMode(genMode); if (!_trendsLoaded) renderTrends(false); }
+  else if (name === "cushion") renderCushion();
   else if (name === "settings") populateSettings();
   window.scrollTo({ top: 0 });
 }
@@ -829,6 +833,83 @@ function promptForAccount(acc, keyword, variant, destUrl, reference) {
   // 목적지 모드 = 목적지 글, 쿠션 모드 = 쿠션 글 (계정 역할이 겸용이어도 현재 모드 기준)
   if (genMode === "destination") return buildBloggerMain({ ...common, sourceText, internalLinks: [] });
   return buildCushionPrompt(acc.platform === "naver" ? "naver" : "blogger", { ...common, sourceText, bloggerUrl: destUrl });
+}
+
+// ===== 쿠션글 전용 메뉴 (발행된 목적지글 → 쿠션 계정별 각기 다른 유입글) =====
+let _cushDests = [];
+async function renderCushion() {
+  try { accounts = await apiJson("/api/accounts").then((j) => j.accounts || []); } catch { accounts = []; }
+  let items = [];
+  try { items = await apiJson("/api/work?status=published").then((j) => j.items || []); } catch {}
+  const amap = accById();
+  _cushDests = items.filter((w) => isDestRole(amap[w.destination_id] || {}) && (w.published_url || w.published_id));
+  const sel = $("cushSrcSelect");
+  if (!_cushDests.length) { sel.innerHTML = '<option value="">발행된 목적지글이 없습니다 (먼저 목적지글을 발행하세요)</option>'; }
+  else { sel.innerHTML = '<option value="">— 발행된 목적지글 선택 —</option>' + _cushDests.map((w) => { const acc = amap[w.destination_id] || {}; return `<option value="${w.id}">${escapeHtml((w.title || "(제목없음)").slice(0, 50))} · ${escapeHtml(acc.name || PLAT_LABEL[w.target] || w.target)}</option>`; }).join(""); }
+  $("cushSrcInfo").classList.add("hidden");
+  renderCushAccPicker();
+}
+function renderCushAccPicker() {
+  const box = $("cushAccPicker"); if (!box) return;
+  const prev = {}; box.querySelectorAll("input").forEach((i) => { prev[i.value] = i.checked; });
+  const had = Object.keys(prev).length > 0;
+  const list = accounts.filter(isCushForMode);
+  box.innerHTML = "";
+  if (!list.length) { box.innerHTML = `<span class="muted">쿠션 계정(블로거/네이버)이 없습니다. '계정 관리'에서 추가하세요.</span>`; return; }
+  for (const a of list) {
+    const checked = had ? (prev[a.id] !== false) : true;
+    const lab = document.createElement("label"); lab.className = "acc-pick";
+    lab.innerHTML = `<input type="checkbox" value="${a.id}" ${checked ? "checked" : ""}><span class="acc-badge cush">${PLAT_LABEL[a.platform] || a.platform}</span><span class="nm">${escapeHtml(a.name || "(이름없음)")}</span>`;
+    box.appendChild(lab);
+  }
+}
+function onCushSrcChange() {
+  const w = _cushDests.find((x) => x.id === $("cushSrcSelect").value);
+  const info = $("cushSrcInfo");
+  if (!w) { info.classList.add("hidden"); return; }
+  const acc = accById()[w.destination_id] || {};
+  info.classList.remove("hidden");
+  info.innerHTML = `<b>${escapeHtml(w.title || "")}</b> <span class="di-plat">${escapeHtml(acc.name || "")}</span>` + (w.published_url ? ` <a href="${w.published_url}" target="_blank" rel="noopener" class="di-link">글 보기</a>` : "");
+}
+function buildCushionForAccount(acc, sourceText, keyword, destUrl, variant) {
+  const v = { ...(variant || {}), style: accountStyle(acc).vibe, persona: acc.persona || "" };
+  const ov = acc.overrides || {};
+  const common = { keyword, audience: ov.audience || settings.defaultAudience, tone: ov.tone || settings.defaultTone, authorBio: ov.authorBio || settings.authorBio, today: todayStr(), imageCount: parseInt($("imgCount").value, 10) || 1, variant: v, reference: `[유입 목적지 글 요약]\n${(sourceText || "").slice(0, 1500)}` };
+  return buildCushionPrompt(acc.platform === "naver" ? "naver" : "blogger", { ...common, sourceText, bloggerUrl: destUrl });
+}
+async function generateCushions() {
+  if (!$("cushSrcSelect").value) { setStatus("유입시킬 목적지글을 선택하세요.", true); return; }
+  const ids = new Set([...document.querySelectorAll("#cushAccPicker input:checked")].map((i) => i.value));
+  const chosen = accounts.filter((a) => ids.has(String(a.id)) && isCushForMode(a));
+  if (!chosen.length) { setStatus("쿠션 계정을 하나 이상 체크하세요.", true); return; }
+  let dest; try { dest = await apiJson("/api/work/" + encodeURIComponent($("cushSrcSelect").value)); } catch { setStatus("목적지글을 불러오지 못했습니다.", true); return; }
+  const destUrl = dest.published_url || "";
+  const sourceText = ((dest.html || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() || (dest.article?.blocks || []).map((b) => b.text || "").join(" ")).slice(0, 6000);
+  const keyword = dest.article?.keyword || dest.title || "";
+  const prevMode = genMode; genMode = "cushion";
+  $("cushGenBtn").disabled = true; genAborted = false;
+  openProgress("쿠션글 생성");
+  progressLog(`목적지: ${dest.title || ""} → 쿠션 ${chosen.length}개`, "done");
+  try {
+    await gatherRelatedLinks(keyword);
+    const groups = {}; chosen.forEach((a) => { (groups[a.platform] = groups[a.platform] || []).push(a); });
+    const idxIn = {}; let done = 0, ok = 0; const total = chosen.length;
+    for (const acc of chosen) {
+      if (genAborted) break;
+      idxIn[acc.platform] = (idxIn[acc.platform] || 0) + 1;
+      const variant = { index: idxIn[acc.platform], total: groups[acc.platform].length };
+      progressStep(`[${acc.name}] 쿠션 작성 중… (${done + 1}/${total})`, 8 + Math.round(done / total * 88));
+      let article;
+      try { article = await chatArticle(buildCushionForAccount(acc, sourceText, keyword, destUrl, variant)); }
+      catch (e) { if (genAborted) break; progressLog(`✗ ${acc.name} 실패: ${e.message}`, "error"); done++; continue; }
+      const html = await finalizeForAccount(acc, article, keyword, destUrl);
+      await apiJson("/api/work", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ draft_id: dest.draft_id || null, target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated", role: "cushion" }) }).catch(() => {});
+      ok++; done++; progressLog(`✓ ${acc.name} 쿠션 생성됨`, "done");
+    }
+    progressDone(true, `쿠션 ${ok}개 생성 완료 — 작업보드에서 검토·발행하세요.`);
+    setStatus(`✅ 쿠션 ${ok}개 생성됨.`);
+  } catch (e) { progressDone(false, "쿠션 생성 실패: " + e.message); }
+  finally { genMode = prevMode; $("cushGenBtn").disabled = false; }
 }
 
 // ----- 헬퍼(유지) -----

@@ -16,6 +16,7 @@
       <nav class="nav">
         <button class="nav-item active" data-view="board"><iconify-icon class="ni" icon="solar:clipboard-list-bold-duotone"></iconify-icon> 작업보드</button>
         <button class="nav-item" data-view="new"><iconify-icon class="ni" icon="solar:magic-stick-3-bold-duotone"></iconify-icon> 새 글 생성</button>
+        <button class="nav-item" data-view="cushion"><iconify-icon class="ni" icon="solar:link-bold-duotone"></iconify-icon> 쿠션글 생성</button>
         <button class="nav-item" data-view="inbox"><iconify-icon class="ni" icon="solar:inbox-line-bold-duotone"></iconify-icon> 초안함 <span class="nav-badge hidden" id="inboxBadge">0</span></button>
         <button class="nav-item" data-view="accounts"><iconify-icon class="ni" icon="solar:key-minimalistic-square-bold-duotone"></iconify-icon> 계정 관리</button>
         <button class="nav-item" data-view="schedule"><iconify-icon class="ni" icon="solar:alarm-bold-duotone"></iconify-icon> 자동화·예약</button>
@@ -125,6 +126,21 @@
             <div id="genAccPick" class="gen-accpick"></div>
           </div>
           <button class="primary hidden" id="genAll"><iconify-icon icon="solar:magic-stick-3-bold"></iconify-icon> 목적지 생성</button>
+        </div>
+      </section>
+
+      <!-- 쿠션글 생성 (발행된 목적지글 → 쿠션 계정별로 각기 다른 유입글 생성) -->
+      <section class="view hidden" data-view="cushion">
+        <div class="view-head"><h2>쿠션글 생성</h2><span class="muted">발행된 목적지글을 고르고, 쿠션 계정을 체크하면 계정마다 다른 유입글이 생성됩니다</span><button class="mini" id="cushRefresh" style="margin-left:auto;">새로고침</button></div>
+        <div class="card">
+          <div class="field"><span>1) 유입시킬 목적지글 (발행된 글)</span>
+            <select id="cushSrcSelect"><option value="">— 발행된 목적지글 선택 —</option></select>
+          </div>
+          <div id="cushSrcInfo" class="dest-info hidden"></div>
+          <div class="opt-sec" style="margin-top:6px;"><iconify-icon icon="solar:users-group-rounded-linear"></iconify-icon> 2) 쿠션으로 쓸 계정 (체크한 수만큼 각기 다른 글 생성)</div>
+          <div id="cushAccPicker" class="gen-accpick" style="margin-top:8px;"></div>
+          <p class="muted">※ 각 쿠션글은 목적지글로 '자세히 보기' 유입 링크가 자동으로 들어갑니다. 생성 후 작업보드에서 검토·발행하세요.</p>
+          <div class="row" style="justify-content:flex-end;"><button class="primary" id="cushGenBtn" style="width:auto;padding:11px 24px;"><iconify-icon icon="solar:magic-stick-3-linear"></iconify-icon> 쿠션글 생성</button></div>
         </div>
       </section>
 
