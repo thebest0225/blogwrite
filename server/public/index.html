@@ -12,18 +12,30 @@
   <div class="app">
     <!-- 사이드바 -->
     <aside class="sidebar">
-      <div class="brand"><iconify-icon icon="solar:pen-new-square-bold-duotone"></iconify-icon> <span>블로그라이터</span></div>
+      <div class="brand"><span class="brand-logo"><iconify-icon icon="solar:pen-new-square-bold-duotone"></iconify-icon></span> <span class="brand-name">블로그라이터</span></div>
       <nav class="nav">
-        <button class="nav-item active" data-view="board"><iconify-icon class="ni" icon="solar:clipboard-list-bold-duotone"></iconify-icon> 작업보드</button>
-        <button class="nav-item" data-view="new"><iconify-icon class="ni" icon="solar:magic-stick-3-bold-duotone"></iconify-icon> 새 글 생성</button>
-        <button class="nav-item" data-view="cushion"><iconify-icon class="ni" icon="solar:link-bold-duotone"></iconify-icon> 쿠션글 생성</button>
-        <button class="nav-item" data-view="inbox"><iconify-icon class="ni" icon="solar:inbox-line-bold-duotone"></iconify-icon> 초안함 <span class="nav-badge hidden" id="inboxBadge">0</span></button>
-        <button class="nav-item" data-view="accounts"><iconify-icon class="ni" icon="solar:key-minimalistic-square-bold-duotone"></iconify-icon> 계정 관리</button>
-        <button class="nav-item" data-view="schedule"><iconify-icon class="ni" icon="solar:alarm-bold-duotone"></iconify-icon> 자동화·예약</button>
-        <button class="nav-item" data-view="bydraft"><iconify-icon class="ni" icon="solar:folder-with-files-bold-duotone"></iconify-icon> 초안별 결과물</button>
-        <button class="nav-item" data-view="history"><iconify-icon class="ni" icon="solar:checklist-minimalistic-bold-duotone"></iconify-icon> 발행 기록</button>
-        <button class="nav-item" data-view="assets"><iconify-icon class="ni" icon="solar:link-round-angle-bold-duotone"></iconify-icon> 발행 자산</button>
-        <button class="nav-item" data-view="settings"><iconify-icon class="ni" icon="solar:settings-bold-duotone"></iconify-icon> 설정</button>
+        <div class="nav-group">
+          <div class="nav-group-label">만들기</div>
+          <button class="nav-item" data-view="new"><iconify-icon class="ni" icon="solar:magic-stick-3-bold-duotone"></iconify-icon> 새 글 생성</button>
+          <button class="nav-item" data-view="cushion"><iconify-icon class="ni" icon="solar:link-bold-duotone"></iconify-icon> 쿠션글 생성</button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">작업 · 검수</div>
+          <button class="nav-item active" data-view="board"><iconify-icon class="ni" icon="solar:clipboard-list-bold-duotone"></iconify-icon> 작업보드</button>
+          <button class="nav-item" data-view="inbox"><iconify-icon class="ni" icon="solar:inbox-line-bold-duotone"></iconify-icon> 초안함 <span class="nav-badge hidden" id="inboxBadge">0</span></button>
+          <button class="nav-item" data-view="bydraft"><iconify-icon class="ni" icon="solar:folder-with-files-bold-duotone"></iconify-icon> 초안별 결과물</button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">성과 · 기록</div>
+          <button class="nav-item" data-view="history"><iconify-icon class="ni" icon="solar:checklist-minimalistic-bold-duotone"></iconify-icon> 발행 기록</button>
+          <button class="nav-item" data-view="assets"><iconify-icon class="ni" icon="solar:link-round-angle-bold-duotone"></iconify-icon> 발행 자산</button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">자동화 · 설정</div>
+          <button class="nav-item" data-view="schedule"><iconify-icon class="ni" icon="solar:alarm-bold-duotone"></iconify-icon> 자동화·예약</button>
+          <button class="nav-item" data-view="accounts"><iconify-icon class="ni" icon="solar:key-minimalistic-square-bold-duotone"></iconify-icon> 계정 관리</button>
+          <button class="nav-item" data-view="settings"><iconify-icon class="ni" icon="solar:settings-bold-duotone"></iconify-icon> 설정</button>
+        </div>
       </nav>
       <div class="side-foot muted"><iconify-icon icon="solar:shield-check-bold-duotone"></iconify-icon> MangoHub 계정 연동됨</div>
     </aside>
