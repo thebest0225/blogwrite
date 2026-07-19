@@ -92,6 +92,20 @@ function buildServer(userId) {
     }
   );
   server.tool(
+    "next_topic",
+    "다음에 쓸 초안 주제를 하나 가져온다. 예약형 자동 초안 작성 시 맨 먼저 호출할 것. 사용자가 미리 넣어둔 '키워드 대기열'에 항목이 있으면 그 키워드를 반환하고(자동 소진), 없으면 사용자의 블로그 니치 목록을 반환한다 — 그 경우 니치 중에서 '지금 시의성 있는(트렌드) 주제'를 스스로 골라라. 어느 경우든 그 주제로 상세 초안을 작성한 뒤 submit_draft로 보내라. 작성 전 list_drafts로 최근 초안과 주제가 겹치지 않는지 확인할 것.",
+    {},
+    async () => {
+      const t = DB.nextTopic(userId);
+      if (t) {
+        const remain = DB.pendingTopicCount(userId);
+        return { content: [{ type: "text", text: JSON.stringify({ mode: "queued", keyword: t.keyword, note: t.note || "", remaining_in_queue: remain, instruction: "이 키워드로 상세 초안을 작성하고 submit_draft로 보내라." }, null, 2) }] };
+      }
+      const niches = DB.nicheList(userId);
+      return { content: [{ type: "text", text: JSON.stringify({ mode: "trend", niches, instruction: "예약된 키워드가 없다. 위 니치 중 하나에서 지금 시의성 있는(최근 트렌드) 주제를 스스로 골라 상세 초안을 작성하고 submit_draft로 보내라. list_drafts로 최근 초안과 중복되지 않게 확인할 것." }, null, 2) }] };
+    }
+  );
+  server.tool(
     "search_my_posts",
     "이미 발행한 내 글들(제목·URL·키워드)을 키워드로 검색한다. 초안을 쓸 때 관련 있는 내 글의 URL을 본문에 자연스럽게 링크로 녹이면 내부 유입에 좋다.",
     { query: z.string().describe("검색 키워드/주제") },

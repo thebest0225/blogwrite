@@ -124,6 +124,8 @@ async function init() {
   $("schScope").addEventListener("change", updateSchForm);
   $("schSave").addEventListener("click", onScheduleSave);
   $("schCancel").addEventListener("click", resetSchForm);
+  $("topicAdd").addEventListener("click", addTopic);
+  $("topicKw").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addTopic(); } });
   $("optSave").addEventListener("click", onSaveOptions);
   $("tgTestBtn").addEventListener("click", onTgTest);
   $("pmClose").addEventListener("click", closeProgress);
@@ -157,7 +159,7 @@ function showView(name) {
   else if (name === "bydraft") renderByDraft();
   else if (name === "history") renderHistory();
   else if (name === "assets") renderMyPosts();
-  else if (name === "schedule") renderSchedules();
+  else if (name === "schedule") { renderSchedules(); renderTopics(); }
   else if (name === "new") { setGenMode(genMode); if (!_trendsLoaded) renderTrends(false); }
   else if (name === "settings") populateSettings();
   window.scrollTo({ top: 0 });
@@ -366,6 +368,29 @@ function resetSchForm() {
   $("schEditId").value = ""; $("schName").value = ""; $("schKeywords").value = ""; $("schRunAt").value = "";
   $("schSource").value = "draft"; $("schScope").value = "destination"; $("schPublish").value = "none"; $("schEnabled").checked = true;
   updateSchForm(); $("schSave").textContent = "예약 저장";
+}
+async function renderTopics() {
+  const box = $("topicList"); if (!box) return;
+  let topics = [];
+  try { topics = await apiJson("/api/topics").then((j) => j.topics || []); } catch {}
+  const pending = topics.filter((t) => t.status === "pending");
+  box.innerHTML = "";
+  if (!topics.length) { box.innerHTML = '<div class="hist-empty">대기 중인 키워드가 없습니다. 비워두면 에이전트가 니치에서 트렌드 주제를 스스로 고릅니다.</div>'; return; }
+  for (const t of topics) {
+    const used = t.status !== "pending";
+    const row = document.createElement("div"); row.className = "acc-row";
+    row.innerHTML = `<span class="acc-badge ${used ? "cush" : "dest"}">${used ? "사용됨" : "대기"}</span>`
+      + `<span class="nm">${escapeHtml(t.keyword)}</span>`
+      + (t.note ? `<span class="muted" style="flex:1;">${escapeHtml(t.note)}</span>` : "");
+    const del = document.createElement("button"); del.className = "hist-del"; del.textContent = "✕";
+    del.addEventListener("click", async () => { await apiJson("/api/topics/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: t.id }) }).catch(() => {}); renderTopics(); });
+    row.appendChild(del); box.appendChild(row);
+  }
+}
+async function addTopic() {
+  const kw = $("topicKw").value.trim(); if (!kw) { setStatus("키워드를 입력하세요.", true); return; }
+  try { await apiJson("/api/topics", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keyword: kw, note: $("topicNote").value.trim() }) }); $("topicKw").value = ""; $("topicNote").value = ""; renderTopics(); setStatus("✅ 키워드 대기열에 추가됨"); }
+  catch (e) { setStatus("추가 실패: " + e.message, true); }
 }
 async function renderSchedules() {
   await loadSchDrafts();

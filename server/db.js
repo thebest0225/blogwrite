@@ -42,8 +42,14 @@ CREATE TABLE IF NOT EXISTS schedules (
   name TEXT, mode TEXT, keywords TEXT, times_per_day INTEGER DEFAULT 1,
   auto TEXT DEFAULT 'draft', enabled INTEGER DEFAULT 1, created_at TEXT
 );
+CREATE TABLE IF NOT EXISTS topic_queue (
+  id TEXT PRIMARY KEY, user_id INTEGER NOT NULL,
+  keyword TEXT NOT NULL, note TEXT, status TEXT DEFAULT 'pending',
+  created_at TEXT, used_at TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_dest_user ON destinations(user_id);
 CREATE INDEX IF NOT EXISTS idx_sched_user ON schedules(user_id);
+CREATE INDEX IF NOT EXISTS idx_topicq_user ON topic_queue(user_id, status);
 `);
 // 계정 역할(목적지/쿠션/겸용) 컬럼 (기존 테이블에도 추가)
 try { db.exec("ALTER TABLE destinations ADD COLUMN role TEXT DEFAULT 'destination'"); } catch {}
@@ -223,6 +229,29 @@ export function getWorkItem(userId, id) {
   const w = db.prepare("SELECT * FROM work_items WHERE user_id=? AND id=?").get(uid(userId), id);
   if (w && w.article_json) { try { w.article = JSON.parse(w.article_json); } catch {} }
   return w;
+}
+// ---- 키워드 대기열 (예약형 클라우드 에이전트가 next_topic으로 소진) ----
+export function addTopic(userId, keyword, note) {
+  const id = rid("t");
+  db.prepare("INSERT INTO topic_queue(id,user_id,keyword,note,status,created_at) VALUES(?,?,?,?,'pending',?)").run(id, uid(userId), String(keyword || "").trim(), note || "", now());
+  return { id, keyword, note: note || "", status: "pending" };
+}
+export function listTopics(userId) {
+  return db.prepare("SELECT id,keyword,note,status,created_at,used_at FROM topic_queue WHERE user_id=? ORDER BY (status='pending') DESC, created_at").all(uid(userId));
+}
+export function nextTopic(userId) {   // 가장 오래된 pending 하나 반환 + used 처리
+  const t = db.prepare("SELECT * FROM topic_queue WHERE user_id=? AND status='pending' ORDER BY created_at LIMIT 1").get(uid(userId));
+  if (!t) return null;
+  db.prepare("UPDATE topic_queue SET status='used', used_at=? WHERE id=?").run(now(), t.id);
+  return t;
+}
+export function deleteTopic(userId, id) { db.prepare("DELETE FROM topic_queue WHERE user_id=? AND id=?").run(uid(userId), id); }
+export function pendingTopicCount(userId) { return db.prepare("SELECT COUNT(*) c FROM topic_queue WHERE user_id=? AND status='pending'").get(uid(userId)).c; }
+// 목적지 니치 목록(트렌드 자동선정 폴백용)
+export function nicheList(userId) {
+  return db.prepare("SELECT name, topics, role FROM destinations WHERE user_id=?").all(uid(userId))
+    .filter((r) => (r.role || "destination") !== "cushion" && (r.topics || "").trim())
+    .map((r) => ({ blog: r.name, niche: r.topics }));
 }
 // 초안별 결과물 묶음: 모든 work_item(전 상태) + 관련 초안 제목맵
 export function workItemsByDraft(userId) {

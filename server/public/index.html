@@ -154,6 +154,17 @@
       <!-- 자동화·예약 -->
       <section class="view hidden" data-view="schedule">
         <div class="view-head"><h2>자동화 · 예약</h2><span class="muted">지정한 날짜·시간에 서버가 알아서 초안·목적지 생성/발행 (부재중용)</span></div>
+
+        <div class="card">
+          <div class="card-title" style="margin-bottom:4px;"><iconify-icon icon="solar:pen-new-square-linear"></iconify-icon> 키워드 대기열 <span class="muted" style="font-weight:400;">— 예약형 클로드 에이전트가 여기서 하나씩 꺼내 초안을 씁니다(비어 있으면 니치 트렌드 자동선정)</span></div>
+          <div class="row" style="gap:8px;flex-wrap:wrap;">
+            <input type="text" id="topicKw" placeholder="키워드/주제 (예: 2026 청년 월세 지원 조건)" style="flex:2;min-width:200px;" />
+            <input type="text" id="topicNote" placeholder="메모(선택) — 방향/포함내용" style="flex:1;min-width:140px;" />
+            <button class="mini primary-mini" id="topicAdd"><iconify-icon icon="solar:add-circle-linear"></iconify-icon> 추가</button>
+          </div>
+          <div id="topicList" class="acc-list" style="margin-top:10px;"></div>
+        </div>
+
         <div class="card">
           <div id="scheduleList" class="acc-list"></div>
         </div>

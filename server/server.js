@@ -546,6 +546,10 @@ app.get("/api/drafts/:id", (req, res) => { const d = DB.getDraft(req.userId, req
 app.post("/api/drafts", (req, res) => res.json({ ok: true, draft: DB.addDraft(req.userId, req.body || {}) }));
 app.post("/api/drafts/delete", (req, res) => { if (req.body?.id) DB.deleteDraft(req.userId, req.body.id); res.json({ ok: true }); });
 app.post("/api/drafts/status", (req, res) => { if (req.body?.id) DB.setDraftStatus(req.userId, req.body.id, req.body.status); res.json({ ok: true }); });
+// 키워드 대기열(예약형 클라우드 에이전트가 next_topic으로 소진)
+app.get("/api/topics", (req, res) => res.json({ topics: DB.listTopics(req.userId) }));
+app.post("/api/topics", (req, res) => { const k = (req.body?.keyword || "").trim(); if (!k) return res.status(400).json({ error: "키워드를 입력하세요." }); res.json({ ok: true, topic: DB.addTopic(req.userId, k, req.body?.note || "") }); });
+app.post("/api/topics/delete", (req, res) => { if (req.body?.id) DB.deleteTopic(req.userId, req.body.id); res.json({ ok: true }); });
 
 // ---- 자동화 예약 ----
 app.get("/api/schedules", (req, res) => res.json({ schedules: DB.listSchedules(req.userId) }));
