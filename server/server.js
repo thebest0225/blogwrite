@@ -192,16 +192,21 @@ app.post("/api/image", async (req, res) => {
 });
 // 서버(자동·예약 발행)용 이미지 생성 — 썸네일(ai_full: 한글 헤드라인 포함) + 본문 1장까지
 const SERVER_THUMB = "Premium eye-catching Korean thumbnail, cinematic high-contrast dramatic lighting, one clear focal subject that POPS (glow/rim light, shallow DOF). If a real person is central, photorealistic dramatic portrait with emotion; product → hero shot; concept → striking symbolic scene. Clean, punchy, NOT busy. NO clip-art graphs/arrows/flags, NO random extra people.";
-async function genArticleImagesServer(article, kKey, thumbStyleOv) {
+async function genArticleImagesServer(article, kKey, thumbStyleOv, opts = {}) {
   if (!kKey) return;
+  const thumbAspect = opts.thumbAspect || "16:9";
+  const bodyAspect = opts.bodyAspect || "4:3";
+  let resolution = opts.resolution || "1K";
   const imgs = (article.blocks || []).filter((b) => b.type === "image" && !b.resolvedUrl).slice(0, 2);
   for (const b of imgs) {
     const isThumb = b.slot === "thumbnail";
     const headline = (b.overlayText || article.title || article.keyword || "").slice(0, 40);
     let prompt = b.prompt || b.alt || article.keyword || "";
-    let aspect = "4:3";
-    if (isThumb) { aspect = "16:9"; prompt = `${thumbStyleOv || SERVER_THUMB}\n\nScene: ${b.prompt || article.keyword || ""}\n\n상단 영역에 큰 한글 헤드라인을 정확한 맞춤법으로 크게: "${headline}". 하단 1/3은 비워둔다. 작은 모바일 썸네일에서도 읽히게. 클립아트·깨진 글자 금지.`; }
-    try { b.resolvedUrl = await runImageJob(IMAGE_MODEL, { prompt, aspect_ratio: aspect, resolution: "1K" }, kKey); } catch (e) { /* 실패한 이미지는 건너뜀 */ }
+    let aspect = isThumb ? thumbAspect : bodyAspect;
+    const [aw, ah] = aspect.split(":").map(Number);
+    const res = (resolution === "4K" && aw === ah) ? "2K" : resolution;   // 정사각 4K는 미지원 → 2K
+    if (isThumb) { prompt = `${thumbStyleOv || SERVER_THUMB}\n\nScene: ${b.prompt || article.keyword || ""}\n\n상단 영역에 큰 한글 헤드라인을 정확한 맞춤법으로 크게: "${headline}". 하단 1/3은 비워둔다. 작은 모바일 썸네일에서도 읽히게. 클립아트·깨진 글자 금지.`; }
+    try { b.resolvedUrl = await runImageJob(IMAGE_MODEL, { prompt, aspect_ratio: aspect, resolution: res }, kKey); } catch (e) { /* 실패한 이미지는 건너뜀 */ }
   }
   // 여전히 URL 없는 이미지 블록은 제거(빈 자리표시 방지)
   article.blocks = (article.blocks || []).filter((b) => b.type !== "image" || b.resolvedUrl);
@@ -341,6 +346,13 @@ async function wpResolveCategory(site, auth, name) {
   } catch {}
   return null;
 }
+// 오구 서브사이트는 앱비번 계정(오구온지기/oguadmin)이 아니라 니치 필자 계정으로 저자 표기
+const OGU_AUTHORS = { benefit: 10, ott: 11, money: 12, pet: 13, apptip: 14, soft: 15, trend: 16, mango: 2 };
+function oguAuthorFor(site) {
+  const m = String(site || "").match(/^https?:\/\/([a-z0-9]+)\.oguonline\.com/i);
+  return m && OGU_AUTHORS[m[1]] ? OGU_AUTHORS[m[1]] : null;
+}
+
 app.post("/api/wp", async (req, res) => {
   const wp = resolveWp(req.userId, req.body?.destinationId);
   if (!wp || !wp.site) return res.status(400).json({ error: "워드프레스 목적지가 설정되지 않았습니다(계정 관리에서 등록)." });
@@ -360,6 +372,7 @@ app.post("/api/wp", async (req, res) => {
     }
     const postBody = { title, content };
     if (String(wp.site).includes("oguonline.com")) postBody.meta = { _ogu_src: "blogwrite" };   // 오구 알림 출처 태그
+    const _oguAuthor = oguAuthorFor(wp.site); if (_oguAuthor) postBody.author = _oguAuthor;      // 니치 필자로 저자 표기
     if (!postId) postBody.status = status;   // 신규만 status 지정(업데이트 시 기존 상태 유지)
     const catId = await wpResolveCategory(wp.site, auth, category);
     if (catId) postBody.categories = [catId];
@@ -591,6 +604,8 @@ const SETTINGS_DEFAULTS = {
   defaultAudience: "관련 정보를 처음 찾아보는 일반 독자",
   authorBio: "여러 분야의 정보를 직접 찾아보고, 최신 자료와 공식 출처를 확인해 이해하기 쉽게 정리합니다. 검색만으로는 흩어져 있던 내용을 한곳에 모아, 실제로 도움이 되는 알맹이만 담으려 합니다.",
   adEnabled: false, adCode: "", internalLinks: false, generateImages: true, imageCount: 1,
+  // 자동 생성 이미지 비율(썸네일/본문)
+  thumbAspect: "16:9", bodyAspect: "4:3",
   // 예약 에이전트가 따를 초안 작성 지침(클로드 프로젝트 지침을 여기 붙여넣기)
   draftGuide: "",
   // 초안 다중 목적지 매칭
@@ -665,6 +680,7 @@ async function publishServer(userId, acc, { title, content, category }) {
     const wp = resolveWp(userId, acc.id); if (!wp || !wp.site || !wp.user || !wp.pass) throw new Error("WP 자격 없음(응용프로그램 비밀번호 확인)");
     const auth = "Basic " + Buffer.from(`${wp.user}:${String(wp.pass).replace(/\s+/g, "")}`).toString("base64");
     const body = { title, content, status: "publish" };
+    const _oguAuthor = oguAuthorFor(wp.site); if (_oguAuthor) body.author = _oguAuthor;   // 니치 필자로 저자 표기
     const catId = await wpResolveCategory(wp.site, auth, category);
     if (catId) body.categories = [catId];
     const r = await fetch(`${wp.site}/wp-json/wp/v2/posts`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -723,7 +739,7 @@ async function runSchedule(s) {
       const article = parseArticle(content);
       if (!article) continue;
       article.today = today; article.keyword = keyword; const abio = ov.authorBio || st.authorBio; if (abio) article.authorBio = abio;
-      try { await genArticleImagesServer(article, kKey, ov.thumbStyle || st.thumbnailStylePrompt); } catch {}
+      try { await genArticleImagesServer(article, kKey, ov.thumbStyle || st.thumbnailStylePrompt, { resolution: st.imageResolution, thumbAspect: st.thumbAspect, bodyAspect: st.bodyAspect }); } catch {}
       const html = buildHtml(article, { accent: st.overlayAccent || "#e11d48", linkMode: st.linkMode || "preserve", adEnabled: st.adEnabled, adCode: st.adCode }).html;
       const wid = DB.upsertWorkItem(userId, { target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated" });
       made++;
@@ -795,7 +811,7 @@ async function processAutoDraft(userId, draft) {
       for (let attempt = 0; attempt < 3 && !content; attempt++) { try { content = await kieChat({ system: built.system, user: built.user, maxTokens: 16000, temperature: 0.8, model: CHAT_MODEL, prefillJson: true, apiKey: kKey }); } catch (e) { if (attempt === 2) throw e; await sleep(1500 * (attempt + 1)); } }
       const article = parseArticle(content); if (!article) throw new Error("파싱 실패");
       article.today = today; article.keyword = keyword; const abio = ov.authorBio || st.authorBio; if (abio) article.authorBio = abio;
-      try { await genArticleImagesServer(article, kKey, ov.thumbStyle || st.thumbnailStylePrompt); } catch {}
+      try { await genArticleImagesServer(article, kKey, ov.thumbStyle || st.thumbnailStylePrompt, { resolution: st.imageResolution, thumbAspect: st.thumbAspect, bodyAspect: st.bodyAspect }); } catch {}
       const html = buildHtml(article, { accent: st.overlayAccent || "#e11d48", linkMode: st.linkMode || "preserve", adEnabled: st.adEnabled, adCode: st.adCode }).html;
       DB.upsertWorkItem(userId, { draft_id: draft.id, target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated" });
       made++;

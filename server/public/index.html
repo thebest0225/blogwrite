@@ -284,7 +284,11 @@
           </div>
           <div class="grid2">
             <label class="field"><span>썸네일 방식</span><select id="optThumbMode"><option value="ai_full">AI 통짜</option><option value="overlay">AI+텍스트</option><option value="off">끄기</option></select></label>
-            <label class="field"><span>이미지 해상도</span><select id="optImgRes"><option>1K</option><option>2K</option><option>4K</option></select></label>
+            <label class="field"><span>이미지 해상도 <span class="muted">(자동 생성 포함)</span></span><select id="optImgRes"><option>1K</option><option>2K</option><option>4K</option></select></label>
+          </div>
+          <div class="grid2">
+            <label class="field"><span>썸네일 비율</span><select id="optThumbAspect"><option value="16:9">16:9 (가로형)</option><option value="4:3">4:3</option><option value="1:1">1:1 (정사각)</option><option value="3:4">3:4 (세로)</option></select></label>
+            <label class="field"><span>본문 이미지 비율</span><select id="optBodyAspect"><option value="4:3">4:3</option><option value="16:9">16:9 (가로형)</option><option value="1:1">1:1 (정사각)</option><option value="3:4">3:4 (세로)</option></select></label>
           </div>
           <div class="grid2">
             <label class="field"><span>링크 처리 <span class="muted">— 초안의 실제 링크는 항상 그대로 유지</span></span><select id="optLinkMode"><option value="preserve">원본·공식 링크 그대로 (권장)</option><option value="search">불명확한 링크는 검색으로 보완</option></select></label>

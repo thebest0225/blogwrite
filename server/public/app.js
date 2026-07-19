@@ -574,6 +574,8 @@ function populateSettings() {
   $("optChatModel").value = settings.kieChatModel || "claude-sonnet-5";
   $("optThumbMode").value = settings.thumbnailMode || "ai_full";
   $("optImgRes").value = settings.imageResolution || "1K";
+  $("optThumbAspect").value = settings.thumbAspect || "16:9";
+  $("optBodyAspect").value = settings.bodyAspect || "4:3";
   $("optLinkMode").value = settings.linkMode || "preserve";
   $("optAccent").value = settings.overlayAccent || "#ff2d55";
   $("optMyBlog").value = settings.myBlogUrl || "";
@@ -600,6 +602,7 @@ async function onSaveOptions() {
   const patch = {
     genEngine: $("optEngine").value,
     kieChatModel: $("optChatModel").value, thumbnailMode: $("optThumbMode").value, imageResolution: $("optImgRes").value,
+    thumbAspect: $("optThumbAspect").value, bodyAspect: $("optBodyAspect").value,
     // 키는 입력했을 때만(비우면 유지)
     ...($("optAnthropicKey").value.trim() ? { anthropicKey: $("optAnthropicKey").value.trim() } : {}),
     ...($("optKieKey").value.trim() ? { kieKey: $("optKieKey").value.trim() } : {}),
