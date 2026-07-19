@@ -126,6 +126,10 @@ async function init() {
   $("schCancel").addEventListener("click", resetSchForm);
   $("topicAdd").addEventListener("click", addTopic);
   $("topicKw").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addTopic(); } });
+  $("draftGuideSave").addEventListener("click", async () => {
+    try { await saveSettings({ draftGuide: $("draftGuide").value }); settings = await getSettings(); setStatus("✅ 초안 작성 지침 저장됨 (다음 실행부터 반영)"); }
+    catch (e) { setStatus("지침 저장 실패: " + e.message, true); }
+  });
   $("optSave").addEventListener("click", onSaveOptions);
   $("tgTestBtn").addEventListener("click", onTgTest);
   $("pmClose").addEventListener("click", closeProgress);
@@ -159,7 +163,7 @@ function showView(name) {
   else if (name === "bydraft") renderByDraft();
   else if (name === "history") renderHistory();
   else if (name === "assets") renderMyPosts();
-  else if (name === "schedule") { renderSchedules(); renderTopics(); }
+  else if (name === "schedule") { renderSchedules(); renderTopics(); $("draftGuide").value = settings.draftGuide || ""; }
   else if (name === "new") { setGenMode(genMode); if (!_trendsLoaded) renderTrends(false); }
   else if (name === "settings") populateSettings();
   window.scrollTo({ top: 0 });

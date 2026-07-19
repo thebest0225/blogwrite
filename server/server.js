@@ -591,6 +591,8 @@ const SETTINGS_DEFAULTS = {
   defaultAudience: "관련 정보를 처음 찾아보는 일반 독자",
   authorBio: "여러 분야의 정보를 직접 찾아보고, 최신 자료와 공식 출처를 확인해 이해하기 쉽게 정리합니다. 검색만으로는 흩어져 있던 내용을 한곳에 모아, 실제로 도움이 되는 알맹이만 담으려 합니다.",
   adEnabled: false, adCode: "", internalLinks: false, generateImages: true, imageCount: 1,
+  // 예약 에이전트가 따를 초안 작성 지침(클로드 프로젝트 지침을 여기 붙여넣기)
+  draftGuide: "",
   // 초안 다중 목적지 매칭
   autoMultiMatch: true, autoMultiMax: 0,
   // 텔레그램 알림

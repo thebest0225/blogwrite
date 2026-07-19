@@ -96,13 +96,14 @@ function buildServer(userId) {
     "다음에 쓸 초안 주제를 하나 가져온다. 예약형 자동 초안 작성 시 맨 먼저 호출할 것. 사용자가 미리 넣어둔 '키워드 대기열'에 항목이 있으면 그 키워드를 반환하고(자동 소진), 없으면 사용자의 블로그 니치 목록을 반환한다 — 그 경우 니치 중에서 '지금 시의성 있는(트렌드) 주제'를 스스로 골라라. 어느 경우든 그 주제로 상세 초안을 작성한 뒤 submit_draft로 보내라. 작성 전 list_drafts로 최근 초안과 주제가 겹치지 않는지 확인할 것.",
     {},
     async () => {
+      const guide = (DB.getSettingsRaw(userId).draftGuide || "").trim();
       const t = DB.nextTopic(userId);
       if (t) {
         const remain = DB.pendingTopicCount(userId);
-        return { content: [{ type: "text", text: JSON.stringify({ mode: "queued", keyword: t.keyword, note: t.note || "", remaining_in_queue: remain, instruction: "이 키워드로 상세 초안을 작성하고 submit_draft로 보내라." }, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify({ mode: "queued", keyword: t.keyword, note: t.note || "", remaining_in_queue: remain, writing_guidelines: guide || "(지정된 지침 없음 — 기본 원칙대로)", instruction: "writing_guidelines를 반드시 지켜 이 키워드로 상세 초안을 작성하고 submit_draft로 보내라." }, null, 2) }] };
       }
       const niches = DB.nicheList(userId);
-      return { content: [{ type: "text", text: JSON.stringify({ mode: "trend", niches, instruction: "예약된 키워드가 없다. 위 니치 중 하나에서 지금 시의성 있는(최근 트렌드) 주제를 스스로 골라 상세 초안을 작성하고 submit_draft로 보내라. list_drafts로 최근 초안과 중복되지 않게 확인할 것." }, null, 2) }] };
+      return { content: [{ type: "text", text: JSON.stringify({ mode: "trend", niches, writing_guidelines: guide || "(지정된 지침 없음 — 기본 원칙대로)", instruction: "예약된 키워드가 없다. 위 niches 중 하나에서 지금 시의성 있는(최근 트렌드) 주제를 스스로 골라라. writing_guidelines를 반드시 지켜 상세 초안을 작성하고 submit_draft로 보내라. list_drafts로 최근 초안과 중복되지 않게 확인할 것." }, null, 2) }] };
     }
   );
   server.tool(
