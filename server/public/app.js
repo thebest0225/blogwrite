@@ -97,9 +97,7 @@ async function init() {
   $("editor").addEventListener("drop", onEditorDrop);
   $("editor").addEventListener("paste", onEditorPaste);
   $("copyBtn").addEventListener("click", onCopy);
-  $("wpDraftBtn").addEventListener("click", () => wpPublish("draft"));
-  $("wpPublishBtn").addEventListener("click", () => wpPublish("publish"));
-  $("mainUrlSave").addEventListener("click", onSaveMainUrl);
+  $("publishBtn").addEventListener("click", publishCur);
   $("markPublishedBtn").addEventListener("click", onMarkPublished);
   $("schedPubSet").addEventListener("click", onSchedulePublishSet);
   $("schedPubClear").addEventListener("click", onSchedulePublishClear);
@@ -115,7 +113,7 @@ async function init() {
   $("accSave").addEventListener("click", onAccountSave);
   $("accCancel").addEventListener("click", resetAccForm);
   $("accGoogleConnect").addEventListener("click", onGoogleConnect);
-  $("bloggerPublishBtn").addEventListener("click", bloggerPublish);
+  // (발행 버튼은 publishBtn 하나로 통합 — 플랫폼은 계정에 따라 자동)
   $("updatePublishBtn").addEventListener("click", updatePublish);
   $("pullLiveBtn").addEventListener("click", pullLive);
   $("aiEditBtn").addEventListener("click", aiEditArticle);
@@ -732,16 +730,6 @@ async function saveMyPost(entry, content) {
   lastMainUrl = entry.url; await renderMyPosts();
 }
 // 워드프레스(목적지) 발행 주소 저장 → 쿠션 목적지로 세팅
-async function onSaveMainUrl() {
-  const url = $("mainUrlInput").value.trim();
-  if (!/^https?:\/\//.test(url)) { setStatus("발행된 주소(https://...)를 입력하세요.", true); return; }
-  const art = cur?.article;
-  const plain = (cur?.html || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 4000);
-  await saveMyPost({ title: art?.title || deriveTopic() || "목적지 글", url, keyword: cur?.keyword || deriveTopic() }, plain);
-  $("bloggerUrl").value = url;   // 쿠션 목적지로 자동 세팅
-  $("mainUrlInput").value = "";
-  setStatus("✅ 목적지 주소 저장 완료. 이제 블로거·네이버 쿠션이 이 글로 유입됩니다.");
-}
 // 예약 발행: 검토 후 지정 시각에 자동 발행되게 예약
 async function onSchedulePublishSet() {
   if (!cur) return;
@@ -1378,15 +1366,23 @@ function renderCur() {
   $("metaLine").textContent = `[${cur.acc.name || PLAT_LABEL[cur.target] || cur.target}] ${cur.article.title || ""}` + (cur.resolvedType ? ` · 유형:${cur.resolvedType}` : "") + (cur.article.category ? ` · 카테고리:${cur.article.category}` : "") + `\n메타: ${cur.article.metaDescription || "-"}`;
   $("preview").srcdoc = buildPreviewDoc(cur.article.title || "", cur.html);
   const published = cur.status === "published";
-  const canUpdate = published && (cur.published_id || cur.published_url) && (cur.target === "wordpress" || cur.target === "blogger");
-  // 이미 발행된 글: '수정 발행'만, 미발행: 일반 발행 버튼들
-  $("wpActions").classList.toggle("hidden", published || cur.target !== "wordpress");
-  $("bloggerPublishBtn").classList.toggle("hidden", published || cur.target !== "blogger");
-  $("markPublishedBtn").classList.toggle("hidden", published || cur.target === "wordpress");
+  const autoPlat = cur.target === "wordpress" || cur.target === "blogger";
+  const canUpdate = published && (cur.published_id || cur.published_url) && autoPlat;
+  // 목적지 안내 배지: 어느 블로그/플랫폼으로 나가는지 + 상태
+  const platLabel = PLAT_LABEL[cur.target] || cur.target;
+  const roleLabel = isDestRole(cur.acc) ? "목적지" : "쿠션";
+  let dest = `<b>${escapeHtml(cur.acc.name || platLabel)}</b> <span class="di-plat">${roleLabel} · ${platLabel}</span>`;
+  if (published) dest += cur.published_url ? ` <a href="${cur.published_url}" target="_blank" rel="noopener" class="di-link">발행됨 → 글 보기</a>` : ` <span class="di-ok">발행됨</span>`;
+  else if (cur.publish_at) dest += ` <span class="di-sched">${fmtRunAt(cur.publish_at)} 예약</span>`;
+  else dest += autoPlat ? ` <span class="di-wait">발행 대기</span>` : ` <span class="di-wait">수동 발행 대상</span>`;
+  $("destInfo").innerHTML = dest;
+  // 미발행: '발행'(WP·블로거 자동) / '저장(수동발행)'. 발행됨: '수정 발행' + '현재본 불러오기'
+  $("publishBtn").classList.toggle("hidden", published || !autoPlat);
+  $("markPublishedBtn").classList.toggle("hidden", published);
   $("updatePublishBtn").classList.toggle("hidden", !canUpdate);
   $("pullLiveBtn").classList.toggle("hidden", !canUpdate);
   // 예약 발행: 미발행 + WP·블로거만
-  const canAuto = !published && (cur.target === "wordpress" || cur.target === "blogger");
+  const canAuto = !published && autoPlat;
   $("schedPubRow").classList.toggle("hidden", !canAuto);
   if (canAuto) {
     $("schedPubAt").value = cur.publish_at ? toLocalInput(cur.publish_at) : "";
@@ -1394,7 +1390,6 @@ function renderCur() {
     $("schedPubState").textContent = set ? `예약됨: ${fmtRunAt(cur.publish_at)}` : "";
     $("schedPubClear").classList.toggle("hidden", !set);
   }
-  $("mainUrlRow").classList.toggle("hidden", !isDestRole(cur.acc));
   $("preview").classList.toggle("hidden", editMode);
   $("editor").classList.toggle("hidden", !editMode);
   renderImageEditors();
@@ -1706,6 +1701,13 @@ async function onCopy() {
   if (!cur?.html) return;
   try { await navigator.clipboard.writeText(cur.html); setStatus(`📋 [${cur.acc.name || cur.target}] HTML 복사됨. 편집기 'HTML' 모드에 붙여넣으세요.`); }
   catch (e) { setStatus("복사 실패: " + e.message, true); }
+}
+// 통합 발행 — 계정 플랫폼에 따라 WP/블로거 자동 라우팅
+async function publishCur() {
+  if (!cur) return;
+  if (cur.target === "wordpress") return wpPublish("publish");
+  if (cur.target === "blogger") return bloggerPublish();
+  setStatus("이 계정은 자동발행 대상이 아닙니다(네이버 등). 'HTML 복사'로 직접 올린 뒤 '저장(수동발행)'을 누르세요.", true);
 }
 async function wpPublish(status) {
   if (!cur?.html) return;

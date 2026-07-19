@@ -40,15 +40,11 @@
             <button class="mini" id="workBack"><iconify-icon icon="solar:arrow-left-linear"></iconify-icon> 목록으로</button>
             <div class="result-actions">
               <button class="mini" id="editToggle"><iconify-icon icon="solar:pen-2-linear"></iconify-icon> 편집</button>
-              <button class="mini primary-mini" id="copyBtn"><iconify-icon icon="solar:copy-linear"></iconify-icon> HTML 복사</button>
-              <span id="wpActions" class="result-actions hidden">
-                <button class="mini" id="wpDraftBtn">WP 초안</button>
-                <button class="mini primary-mini" id="wpPublishBtn"><iconify-icon icon="solar:upload-minimalistic-linear"></iconify-icon> WP 발행</button>
-              </span>
-              <button class="mini primary-mini hidden" id="bloggerPublishBtn"><iconify-icon icon="solar:upload-minimalistic-linear"></iconify-icon> 블로거 발행</button>
+              <button class="mini primary-mini hidden" id="publishBtn"><iconify-icon icon="solar:upload-minimalistic-linear"></iconify-icon> 발행</button>
+              <button class="mini hidden" id="markPublishedBtn" title="다른 곳(네이버 등)에 직접 올렸을 때, 발행됨으로 저장"><iconify-icon icon="solar:check-read-linear"></iconify-icon> 저장(수동발행)</button>
               <button class="mini hidden" id="pullLiveBtn"><iconify-icon icon="solar:cloud-download-linear"></iconify-icon> 블로그 현재본 불러오기</button>
-              <button class="mini primary-mini hidden" id="updatePublishBtn"><iconify-icon icon="solar:refresh-circle-linear"></iconify-icon> 수정 발행(업데이트)</button>
-              <button class="mini" id="markPublishedBtn"><iconify-icon icon="solar:check-read-linear"></iconify-icon> 발행 완료 표시</button>
+              <button class="mini primary-mini hidden" id="updatePublishBtn"><iconify-icon icon="solar:refresh-circle-linear"></iconify-icon> 수정 발행</button>
+              <button class="mini" id="copyBtn"><iconify-icon icon="solar:copy-linear"></iconify-icon> HTML 복사</button>
             </div>
           </div>
           <div class="mainurl-row" id="schedPubRow" style="background:var(--accent-soft);border-color:#dfe2fb;">
@@ -57,11 +53,7 @@
             <button class="mini primary-mini" id="schedPubSet">예약</button>
             <button class="mini hidden" id="schedPubClear">예약 해제</button>
           </div>
-          <div class="mainurl-row hidden" id="mainUrlRow">
-            <span class="muted">발행된 목적지(WP) 주소를 저장하면 쿠션이 이 글로 유입됩니다 (WP 발행 버튼 쓰면 자동)</span>
-            <input type="text" id="mainUrlInput" placeholder="https://wp.mangois.love/발행-글" />
-            <button class="mini primary-mini" id="mainUrlSave">목적지 주소 저장</button>
-          </div>
+          <div class="dest-info" id="destInfo"></div>
           <div class="meta-line" id="metaLine"></div>
           <div class="ai-edit-row" id="aiEditRow">
             <iconify-icon icon="solar:chat-round-line-linear" style="font-size:18px;color:var(--accent);flex:none;"></iconify-icon>
