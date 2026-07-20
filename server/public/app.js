@@ -102,6 +102,7 @@ async function init() {
   $("cushGenBtn").addEventListener("click", generateCushions);
   $("cushRefresh").addEventListener("click", renderCushion);
   $("cushSrcSelect").addEventListener("change", onCushSrcChange);
+  const brandEl = document.querySelector(".brand"); if (brandEl) { brandEl.style.cursor = "pointer"; brandEl.title = "홈(작업보드)으로"; brandEl.addEventListener("click", () => showView("board")); }
   $("anRefresh").addEventListener("click", renderAnalytics);
   ["anWindow", "anSort", "anDir", "anBlog"].forEach((id) => $(id).addEventListener("change", renderAnList));
   $("schedPubSet").addEventListener("click", onSchedulePublishSet);
