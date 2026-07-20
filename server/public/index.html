@@ -16,6 +16,7 @@
       <nav class="nav">
         <div class="nav-group">
           <div class="nav-group-label">만들기</div>
+          <button class="nav-item" data-view="trends"><iconify-icon class="ni" icon="solar:fire-bold-duotone"></iconify-icon> 트렌드</button>
           <button class="nav-item" data-view="new"><iconify-icon class="ni" icon="solar:magic-stick-3-bold-duotone"></iconify-icon> 새 글 생성</button>
           <button class="nav-item" data-view="cushion"><iconify-icon class="ni" icon="solar:link-bold-duotone"></iconify-icon> 쿠션글 생성</button>
         </div>
@@ -83,25 +84,25 @@
         </div>
       </section>
 
-      <!-- 새 글 생성 (2단계: 목적지 먼저 → 발행 → 쿠션) -->
-      <section class="view hidden" data-view="new">
-        <div class="view-head"><h2>새 글 생성</h2><span class="muted">① 목적지 먼저 만들어 발행 → ② 그 URL로 쿠션 생성</span></div>
-
-        <!-- 트렌드: 글쓰기 출발점 · 상단 항상 표시 -->
+      <!-- 트렌드 (별도 메뉴): 카드 클릭 → 새 글 생성(초안)으로 이동 -->
+      <section class="view hidden" data-view="trends">
+        <div class="view-head"><h2>트렌드</h2><span class="muted">지금 뜨는 주제. 카드를 누르면 그 주제로 <b>초안 생성</b>으로 넘어갑니다.</span>
+          <button class="mini" id="trendRefresh" style="margin-left:auto;"><iconify-icon icon="solar:refresh-linear"></iconify-icon> 새로고침</button>
+        </div>
         <div class="card trend-card">
-          <div class="trend-head">
-            <div class="card-title"><iconify-icon icon="solar:fire-bold-duotone"></iconify-icon> 지금 뜨는 트렌드</div>
-            <span id="trendMeta" class="muted"></span>
-            <button class="mini" id="trendRefresh"><iconify-icon icon="solar:refresh-linear"></iconify-icon> 새로고침</button>
-          </div>
-          <p class="muted trend-hint">카드를 누르면 그 주제로 <b>원본 입력</b>이 채워집니다. 뉴스 배지는 새 탭으로 열려요.</p>
+          <div class="trend-head"><div class="card-title"><iconify-icon icon="solar:fire-bold-duotone"></iconify-icon> 지금 뜨는 트렌드</div><span id="trendMeta" class="muted"></span></div>
+          <p class="muted trend-hint">카드를 누르면 <b>초안 생성</b> 화면으로 이동해 그 주제가 채워집니다. 뉴스 배지는 새 탭으로 열려요.</p>
           <div id="trendList" class="trend-grid"></div>
         </div>
+      </section>
+
+      <!-- 새 글 생성 (초안 → 목적지, 2단계) -->
+      <section class="view hidden" data-view="new">
+        <div class="view-head"><h2>새 글 생성</h2><span class="muted">① 키워드로 초안 만들기 → ② 그 초안으로 목적지 글 만들기 (쿠션은 별도 메뉴)</span></div>
 
         <div class="mode-tabs">
           <button class="mode-tab active" data-mode="draft"><iconify-icon icon="solar:document-add-bold-duotone"></iconify-icon> ① 초안 만들기</button>
-          <button class="mode-tab" data-mode="destination"><iconify-icon icon="solar:target-bold-duotone"></iconify-icon> ② 목적지 만들기</button>
-          <button class="mode-tab" data-mode="cushion"><iconify-icon icon="solar:share-circle-bold-duotone"></iconify-icon> ③ 쿠션 만들기</button>
+          <button class="mode-tab" data-mode="destination"><iconify-icon icon="solar:target-bold-duotone"></iconify-icon> ② 목적지 글 만들기</button>
         </div>
         <div class="card">
           <p class="muted" id="modeHelp"></p>

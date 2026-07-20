@@ -167,7 +167,8 @@ function showView(name) {
   else if (name === "history") renderHistory();
   else if (name === "assets") renderMyPosts();
   else if (name === "schedule") { renderSchedules(); renderTopics(); $("draftGuide").value = settings.draftGuide || ""; }
-  else if (name === "new") { setGenMode(genMode); if (!_trendsLoaded) renderTrends(false); }
+  else if (name === "new") { setGenMode(genMode === "cushion" ? "draft" : genMode); }
+  else if (name === "trends") { if (!_trendsLoaded) renderTrends(false); }
   else if (name === "cushion") renderCushion();
   else if (name === "analytics") renderAnalytics();
   else if (name === "settings") populateSettings();
@@ -672,12 +673,12 @@ async function renderTrends(force) {
       + (it.newsTitle ? `<span class="trend-news">${escapeHtml(it.newsTitle)}</span>` : "")
       + `</span>`;
     card.addEventListener("click", () => {
+      selectedTrend = { title: it.title, traffic: it.traffic || "", newsTitle: it.newsTitle || "", newsSource: it.newsSource || "", source: it.source || "" };
+      showView("new");            // 트렌드 → 새 글 생성(초안)으로 이동
       setGenMode("draft");
       $("draftKeyword").value = it.title;
-      selectedTrend = { title: it.title, traffic: it.traffic || "", newsTitle: it.newsTitle || "", newsSource: it.newsSource || "", source: it.source || "" };
       $("draftKeyword").focus();
-      $("draftGenRow").scrollIntoView({ behavior: "smooth", block: "center" });
-      setStatus(`✨ "${it.title}" 트렌드를 초안 키워드에 넣었어요(뉴스 맥락 반영). 'AI 초안 생성'을 누르세요.`);
+      setStatus(`✨ "${it.title}" 트렌드를 초안 키워드에 넣었어요. 'AI 초안 생성'을 누르세요.`);
     });
     if (it.newsUrl) {
       const a = document.createElement("a"); a.className = "trend-newslink"; a.href = it.newsUrl; a.target = "_blank"; a.rel = "noopener";
