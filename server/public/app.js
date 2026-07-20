@@ -199,7 +199,7 @@ function renderAccPicker() {
   const list = accountsForMode(); box.innerHTML = "";
   if (!list.length) { box.innerHTML = `<span class="muted">등록된 ${genMode === "destination" ? "목적지" : "쿠션"} 계정이 없습니다. '계정 관리'에서 추가하세요.</span>`; return; }
   for (const a of list) {
-    const checked = hadAny ? (prev[a.id] !== false) : true;   // 기존에 해제했으면 유지, 새 계정/최초엔 체크
+    const checked = hadAny ? (prev[a.id] === true) : false;   // 기본 미체크 — 초안 니치에 맞는 것만 자동 체크(autoSelectAccountsByTopic)
     const lab = document.createElement("label"); lab.className = "acc-pick";
     lab.innerHTML = `<input type="checkbox" value="${a.id}" ${checked ? "checked" : ""}>`
       + `<span class="acc-badge ${genMode === "destination" ? "dest" : "cush"}">${PLAT_LABEL[a.platform] || a.platform}</span>`
