@@ -585,6 +585,27 @@ app.post("/api/destinations/delete", (req, res) => res.json({ ok: true, destinat
 // ---- 작업 항목(칸반) ----
 app.get("/api/work", (req, res) => res.json({ items: DB.listWorkItems(req.userId, req.query.status) }));
 app.get("/api/by-draft", (req, res) => res.json(DB.workItemsByDraft(req.userId)));
+// 조회수 분석: 발행글 누적/최근증가(Δ)/급등배수
+app.get("/api/analytics", (req, res) => {
+  const windowH = Math.max(1, Math.min(720, parseInt(req.query.window, 10) || 24));
+  const nowMs = Date.now(), winMs = windowH * 3600 * 1000;
+  const sinceIso = new Date(nowMs - (windowH * 2 * 3600 * 1000) - 3600 * 1000).toISOString();
+  const snaps = DB.statSnapshotsSince(req.userId, sinceIso);
+  const series = {}; for (const s of snaps) (series[s.work_id] = series[s.work_id] || []).push(s);
+  const amap = {}; DB.accountsForGeneration(req.userId).forEach((a) => { amap[a.id] = a; });
+  const viewsAt = (arr, tMs) => { let best = null; for (const s of arr) { const st = Date.parse(s.ts); if (st <= tMs && (!best || st > Date.parse(best.ts))) best = s; } return best ? best.views : (arr.length ? arr[0].views : 0); };
+  const posts = DB.publishedForStats(req.userId).map((p) => {
+    const arr = series[p.id] || [];
+    const cur = arr.length ? arr[arr.length - 1].views : 0;
+    const t1 = viewsAt(arr, nowMs - winMs), t2 = viewsAt(arr, nowMs - 2 * winMs);
+    const dWin = Math.max(0, cur - t1), dPrev = Math.max(0, t1 - t2);
+    const surge = dPrev > 0 ? Math.round(dWin / dPrev * 10) / 10 : (dWin > 0 ? 99 : 0);
+    const acc = amap[p.destination_id] || {};
+    return { work_id: p.id, title: p.title, url: p.published_url, blog: acc.name || p.target, cumulative: cur, delta: dWin, surge, samples: arr.length };
+  });
+  posts.sort((a, b) => b.delta - a.delta || b.cumulative - a.cumulative);
+  res.json({ window: windowH, posts, collecting: snaps.length > 0, lastAt: DB.lastStatTs(req.userId) });
+});
 app.get("/api/work/:id", (req, res) => { const w = DB.getWorkItem(req.userId, req.params.id); w ? res.json(w) : res.status(404).json({ error: "not found" }); });
 app.post("/api/work", (req, res) => res.json({ ok: true, id: DB.upsertWorkItem(req.userId, req.body || {}) }));
 app.post("/api/work/delete", (req, res) => { if (req.body?.id) DB.deleteWorkItem(req.userId, req.body.id); res.json({ ok: true }); });
@@ -824,6 +845,37 @@ async function processAutoDraft(userId, draft) {
 const AUTO_INTERVAL = parseInt(process.env.AUTO_PROCESS_INTERVAL_MS, 10) || 10 * 60 * 1000;  // 초안 자동처리 간격(기본 10분)
 let _lastAutoAt = Date.now() - AUTO_INTERVAL + 90 * 1000;   // 시작 후 첫 처리는 약 90초 뒤(확인용), 이후 10분 간격
 const _autoFails = new Map();   // 초안별 연속 생성 실패 횟수(3회면 건너뜀 → 큐 막힘 방지)
+// ---- 조회수 스냅샷 수집 (발행글 누적 조회수를 주기적으로 저장 → 24h/48h/급등 계산용) ----
+const STAT_INTERVAL = 60 * 60 * 1000;   // 1시간마다
+let _lastStatAt = Date.now() - STAT_INTERVAL + 120 * 1000;   // 시작 후 첫 수집 2분 뒤
+async function collectPostStats() {
+  const nowIso = new Date().toISOString();
+  for (const uid2 of DB.usersWithPublishedStats()) {
+    const accs = {}; DB.accountsForGeneration(uid2).forEach((a) => { accs[a.id] = a; });
+    const bySite = {};
+    for (const p of DB.publishedForStats(uid2)) {
+      const acc = accs[p.destination_id];
+      let site = acc && acc.site_url ? normSite(acc.site_url) : "";
+      if (!site && p.published_url) { try { site = new URL(p.published_url).origin; } catch {} }
+      if (!site) continue;
+      (bySite[site] = bySite[site] || []).push(p);
+    }
+    for (const [site, list] of Object.entries(bySite)) {
+      const idToWork = {}; list.forEach((p) => { idToWork[String(p.published_id)] = p.id; });
+      const ids = Object.keys(idToWork);
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = ids.slice(i, i + 100);
+        try {
+          const r = await fetch(`${site}/wp-json/mango/v1/views?ids=${chunk.join(",")}`, { signal: AbortSignal.timeout(20000) });
+          if (!r.ok) continue;
+          const j = await r.json();
+          for (const [pid, v] of Object.entries(j || {})) { const wid = idToWork[pid]; if (wid) DB.addStatSnapshot(uid2, wid, parseInt(v, 10) || 0, nowIso); }
+        } catch (e) { /* 사이트 접속 실패 시 이번 회차 건너뜀 */ }
+      }
+    }
+  }
+  DB.pruneStats(new Date(Date.now() - 21 * 86400 * 1000).toISOString());   // 21일 보관
+}
 let _schedRunning = false;
 async function checkSchedules() {
   if (_schedRunning) return; _schedRunning = true;
@@ -846,6 +898,8 @@ async function checkSchedules() {
         break;
       }
     }
+    // 조회수 스냅샷 수집(1시간마다)
+    if (Date.now() - _lastStatAt >= STAT_INTERVAL) { _lastStatAt = Date.now(); try { await collectPostStats(); } catch (e) { console.error("[stats]", e.message); } }
     // 완료된 예약 정리(2시간 지난 done 삭제)
     DB.pruneDoneSchedules(new Date(Date.now() - 2 * 3600 * 1000).toISOString());
   }

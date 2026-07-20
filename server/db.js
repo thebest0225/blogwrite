@@ -47,6 +47,12 @@ CREATE TABLE IF NOT EXISTS topic_queue (
   keyword TEXT NOT NULL, note TEXT, status TEXT DEFAULT 'pending',
   created_at TEXT, used_at TEXT
 );
+CREATE TABLE IF NOT EXISTS post_stats (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL, work_id TEXT NOT NULL,
+  ts TEXT NOT NULL, views INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_pstats ON post_stats(user_id, work_id, ts);
 CREATE INDEX IF NOT EXISTS idx_dest_user ON destinations(user_id);
 CREATE INDEX IF NOT EXISTS idx_sched_user ON schedules(user_id);
 CREATE INDEX IF NOT EXISTS idx_topicq_user ON topic_queue(user_id, status);
@@ -253,6 +259,20 @@ export function nicheList(userId) {
     .filter((r) => (r.role || "destination") !== "cushion" && (r.topics || "").trim())
     .map((r) => ({ blog: r.name, niche: r.topics }));
 }
+// ---- 조회수 스냅샷(발행글 시계열) ----
+// 발행된 워드프레스 글(수집 대상): published_id 있는 것
+export function publishedForStats(userId) {
+  return db.prepare("SELECT id,target,destination_id,title,published_url,published_id FROM work_items WHERE user_id=? AND status='published' AND published_id IS NOT NULL AND published_id<>'' AND target='wordpress'").all(uid(userId));
+}
+export function addStatSnapshot(userId, workId, views, ts) {
+  db.prepare("INSERT INTO post_stats(user_id,work_id,ts,views) VALUES(?,?,?,?)").run(uid(userId), workId, ts, views | 0);
+}
+export function statSnapshotsSince(userId, sinceIso) {
+  return db.prepare("SELECT work_id,ts,views FROM post_stats WHERE user_id=? AND ts>=? ORDER BY ts").all(uid(userId), sinceIso);
+}
+export function pruneStats(cutoffIso) { db.prepare("DELETE FROM post_stats WHERE ts<?").run(cutoffIso); }
+export function usersWithPublishedStats() { return db.prepare("SELECT DISTINCT user_id FROM work_items WHERE status='published' AND target='wordpress' AND published_id IS NOT NULL AND published_id<>''").all().map((r) => r.user_id); }
+export function lastStatTs(userId) { const r = db.prepare("SELECT MAX(ts) m FROM post_stats WHERE user_id=?").get(uid(userId)); return r && r.m ? r.m : null; }
 // 초안별 결과물 묶음: 모든 work_item(전 상태) + 관련 초안 제목맵
 export function workItemsByDraft(userId) {
   const items = db.prepare("SELECT id,draft_id,target,destination_id,title,status,published_url,published_id,publish_mode,publish_at,updated_at FROM work_items WHERE user_id=? ORDER BY updated_at DESC").all(uid(userId));

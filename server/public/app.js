@@ -102,6 +102,8 @@ async function init() {
   $("cushGenBtn").addEventListener("click", generateCushions);
   $("cushRefresh").addEventListener("click", renderCushion);
   $("cushSrcSelect").addEventListener("change", onCushSrcChange);
+  $("anRefresh").addEventListener("click", renderAnalytics);
+  $("anWindow").addEventListener("change", renderAnalytics);
   $("schedPubSet").addEventListener("click", onSchedulePublishSet);
   $("schedPubClear").addEventListener("click", onSchedulePublishClear);
   $("workBack").addEventListener("click", () => { cur = null; $("workDetail").style.display = "none"; });
@@ -167,6 +169,7 @@ function showView(name) {
   else if (name === "schedule") { renderSchedules(); renderTopics(); $("draftGuide").value = settings.draftGuide || ""; }
   else if (name === "new") { setGenMode(genMode); if (!_trendsLoaded) renderTrends(false); }
   else if (name === "cushion") renderCushion();
+  else if (name === "analytics") renderAnalytics();
   else if (name === "settings") populateSettings();
   window.scrollTo({ top: 0 });
 }
@@ -833,6 +836,37 @@ function promptForAccount(acc, keyword, variant, destUrl, reference) {
   // 목적지 모드 = 목적지 글, 쿠션 모드 = 쿠션 글 (계정 역할이 겸용이어도 현재 모드 기준)
   if (genMode === "destination") return buildBloggerMain({ ...common, sourceText, internalLinks: [] });
   return buildCushionPrompt(acc.platform === "naver" ? "naver" : "blogger", { ...common, sourceText, bloggerUrl: destUrl });
+}
+
+// ===== 조회수 분석 =====
+async function renderAnalytics() {
+  const box = $("anList"), note = $("anNote"), win = $("anWindow").value || "24";
+  box.innerHTML = '<div class="hist-empty">불러오는 중…</div>';
+  let d; try { d = await apiJson("/api/analytics?window=" + win); } catch { box.innerHTML = '<div class="hist-empty">불러오기 실패</div>'; return; }
+  if (!d.posts || !d.posts.length) { box.innerHTML = '<div class="hist-empty">집계할 발행글(워드프레스)이 아직 없습니다. 목적지글을 발행하면 1시간마다 조회수를 모읍니다.</div>'; note.classList.add("hidden"); return; }
+  const hasSamples = d.posts.some((p) => p.samples >= 2);
+  if (!hasSamples) { note.classList.remove("hidden"); note.innerHTML = `<iconify-icon icon="solar:clock-circle-bold-duotone"></iconify-icon> 조회수 수집을 시작했습니다. <b>누적 조회수는 바로</b> 보이고, <b>Δ·급등은 데이터가 ${win}시간 쌓인 뒤</b>부터 정확해집니다.`; }
+  else note.classList.add("hidden");
+  box.innerHTML = "";
+  for (const p of d.posts) {
+    const surge = p.surge >= 2 ? `<span class="pubm" style="background:#fee2e2;color:#b91c1c;">🔥 급등 x${p.surge}</span>` : (p.delta > 0 ? `<span class="pubm" style="background:#e7f7ec;color:#137a3e;">▲ ${p.delta}</span>` : `<span class="df">-</span>`);
+    const row = document.createElement("div"); row.className = "acc-row";
+    row.innerHTML = `<span class="acc-plat" style="min-width:88px;">${escapeHtml(p.blog || "")}</span>`
+      + `<span class="nm">${escapeHtml(p.title || "(제목없음)")}</span>`
+      + `<span class="df" title="누적 조회수">👁 ${p.cumulative}</span>` + surge;
+    if (p.url) { const a = document.createElement("a"); a.className = "mini"; a.href = p.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = "글 보기"; row.appendChild(a); }
+    const cush = document.createElement("button"); cush.className = "mini primary-mini"; cush.innerHTML = `<iconify-icon icon="solar:link-linear"></iconify-icon> 쿠션글`; cush.addEventListener("click", () => openCushionFor(p.work_id)); row.appendChild(cush);
+    box.appendChild(row);
+  }
+}
+async function openCushionFor(workId) {
+  document.querySelectorAll(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.view === "cushion"));
+  document.querySelectorAll(".view").forEach((v) => v.classList.toggle("hidden", v.dataset.view !== "cushion"));
+  window.scrollTo({ top: 0 });
+  await renderCushion();
+  const sel = $("cushSrcSelect");
+  if ([...sel.options].some((o) => o.value === workId)) { sel.value = workId; onCushSrcChange(); }
+  else setStatus("이 글은 쿠션 목록에 없습니다(목적지 역할·발행 상태 확인).", true);
 }
 
 // ===== 쿠션글 전용 메뉴 (발행된 목적지글 → 쿠션 계정별 각기 다른 유입글) =====
