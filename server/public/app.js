@@ -1442,19 +1442,20 @@ async function renderHistory() {
   if (q) items = items.filter((w) => ((w.title || "") + (amap[w.destination_id]?.name || "") + (PLAT_LABEL[w.target] || "")).toLowerCase().includes(q));
   if (fDest) items = items.filter((w) => w.destination_id === fDest);
   if (fMode) items = items.filter((w) => (w.publish_mode || "") === fMode);
-  $("historyCount").textContent = `— 총 ${_history.length}건 · 표시 ${items.length}건`;
+  const cnt = { manual: 0, auto: 0, scheduled: 0, other: 0 };
+  for (const w of _history) { const m = w.publish_mode; if (m === "manual") cnt.manual++; else if (m === "auto") cnt.auto++; else if (m === "scheduled") cnt.scheduled++; else cnt.other++; }
+  $("historyCount").textContent = `— 총 ${_history.length}건 (수동 ${cnt.manual} · 자동 ${cnt.auto} · 예약 ${cnt.scheduled}${cnt.other ? ` · 기타 ${cnt.other}` : ""})${items.length !== _history.length ? ` · 표시 ${items.length}건` : ""}`;
   box.innerHTML = "";
   if (!items.length) { box.innerHTML = '<div class="hist-empty">해당 조건의 발행 글이 없습니다.</div>'; return; }
   for (const w of items) {
     const acc = amap[w.destination_id] || { platform: w.target };
-    const d = new Date(w.updated_at || Date.now());
-    const dstr = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
+    const dstr = fmtDateTime(w.updated_at);
     const mode = w.publish_mode === "scheduled" ? `<span class="pubm auto">예약발행</span>` : w.publish_mode === "auto" ? `<span class="pubm auto">자동발행</span>` : (w.publish_mode === "manual" ? `<span class="pubm manual">수동발행</span>` : `<span class="pubm">발행됨</span>`);
     const row = document.createElement("div"); row.className = "acc-row";
     row.innerHTML = `${mode}`
       + `<span class="acc-plat">${PLAT_LABEL[w.target] || w.target}${acc.name ? " · " + acc.name : ""}</span>`
       + `<span class="nm">${escapeHtml(w.title || "(제목없음)")}</span>`
-      + `<span class="df" style="color:var(--muted)">${dstr}</span>`;
+      + `<span class="df an-date" style="color:var(--muted)">${dstr}</span>`;
     if (w.published_url) {
       const a = document.createElement("a"); a.className = "mini"; a.href = w.published_url; a.target = "_blank"; a.rel = "noopener";
       a.innerHTML = `<iconify-icon icon="solar:square-top-down-linear"></iconify-icon> 열기`;
