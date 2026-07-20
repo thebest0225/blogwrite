@@ -103,7 +103,7 @@ async function init() {
   $("cushRefresh").addEventListener("click", renderCushion);
   $("cushSrcSelect").addEventListener("change", onCushSrcChange);
   $("anRefresh").addEventListener("click", renderAnalytics);
-  $("anWindow").addEventListener("change", renderAnalytics);
+  ["anWindow", "anSort", "anDir", "anBlog"].forEach((id) => $(id).addEventListener("change", renderAnList));
   $("schedPubSet").addEventListener("click", onSchedulePublishSet);
   $("schedPubClear").addEventListener("click", onSchedulePublishClear);
   $("workBack").addEventListener("click", () => { cur = null; $("workDetail").style.display = "none"; });
@@ -839,21 +839,42 @@ function promptForAccount(acc, keyword, variant, destUrl, reference) {
 }
 
 // ===== 조회수 분석 =====
+let _anData = null;
+function fmtDateTime(iso) { if (!iso) return "-"; const d = new Date(iso.includes("T") || iso.includes("Z") ? iso : iso.replace(" ", "T")); if (isNaN(d)) return "-"; const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
 async function renderAnalytics() {
-  const box = $("anList"), note = $("anNote"), win = $("anWindow").value || "24";
+  const box = $("anList");
   box.innerHTML = '<div class="hist-empty">불러오는 중…</div>';
-  let d; try { d = await apiJson("/api/analytics?window=" + win); } catch { box.innerHTML = '<div class="hist-empty">불러오기 실패</div>'; return; }
-  if (!d.posts || !d.posts.length) { box.innerHTML = '<div class="hist-empty">집계할 발행글(워드프레스)이 아직 없습니다. 목적지글을 발행하면 1시간마다 조회수를 모읍니다.</div>'; note.classList.add("hidden"); return; }
-  const hasSamples = d.posts.some((p) => p.samples >= 2);
-  if (!hasSamples) { note.classList.remove("hidden"); note.innerHTML = `<iconify-icon icon="solar:clock-circle-bold-duotone"></iconify-icon> 조회수 수집을 시작했습니다. <b>누적 조회수는 바로</b> 보이고, <b>Δ·급등은 데이터가 ${win}시간 쌓인 뒤</b>부터 정확해집니다.`; }
+  try { _anData = await apiJson("/api/analytics"); } catch { box.innerHTML = '<div class="hist-empty">불러오기 실패</div>'; return; }
+  // 블로그 필터 옵션 채우기
+  const blogs = [...new Set((_anData.posts || []).map((p) => p.blog).filter(Boolean))];
+  const bsel = $("anBlog"), cur0 = bsel.value;
+  bsel.innerHTML = '<option value="">전체 블로그</option>' + blogs.map((b) => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join("");
+  bsel.value = cur0;
+  renderAnList();
+}
+function renderAnList() {
+  const box = $("anList"), note = $("anNote");
+  if (!_anData) return;
+  const posts = _anData.posts || [];
+  if (!posts.length) { box.innerHTML = '<div class="hist-empty">집계할 발행글(워드프레스)이 아직 없습니다. 목적지글을 발행하면 1시간마다 조회수를 모읍니다.</div>'; note.classList.add("hidden"); return; }
+  const win = parseInt($("anWindow").value, 10) || 24;
+  const sort = $("anSort").value, dir = $("anDir").value === "asc" ? 1 : -1, blog = $("anBlog").value;
+  if (!posts.some((p) => p.samples >= 2)) { note.classList.remove("hidden"); note.innerHTML = `<iconify-icon icon="solar:clock-circle-bold-duotone"></iconify-icon> 조회수 수집 시작됨. <b>누적은 바로</b>, <b>Δ·급등은 스냅샷이 쌓인 뒤(24~48h)</b>부터 정확해집니다.`; }
   else note.classList.add("hidden");
+  let list = blog ? posts.filter((p) => p.blog === blog) : posts.slice();
+  const metric = (p) => sort === "cumulative" ? p.cumulative : sort === "published" ? Date.parse(p.published_at || 0) || 0 : sort === "surge" ? p.surge24 : (p.deltas ? (p.deltas[win] || 0) : 0);
+  list.sort((a, b) => (metric(a) - metric(b)) * dir);
   box.innerHTML = "";
-  for (const p of d.posts) {
-    const surge = p.surge >= 2 ? `<span class="pubm" style="background:#fee2e2;color:#b91c1c;">🔥 급등 x${p.surge}</span>` : (p.delta > 0 ? `<span class="pubm" style="background:#e7f7ec;color:#137a3e;">▲ ${p.delta}</span>` : `<span class="df">-</span>`);
+  if (!list.length) { box.innerHTML = '<div class="hist-empty">해당 블로그의 발행글이 없습니다.</div>'; return; }
+  for (const p of list) {
+    const dWin = p.deltas ? (p.deltas[win] || 0) : 0;
+    const deltaBadge = dWin > 0 ? `<span class="pubm" style="background:#e7f7ec;color:#137a3e;">▲ ${dWin}</span>` : `<span class="df">Δ0</span>`;
+    const surgeBadge = p.surge24 >= 2 ? `<span class="pubm" style="background:#fee2e2;color:#b91c1c;">🔥x${p.surge24}</span>` : "";
     const row = document.createElement("div"); row.className = "acc-row";
-    row.innerHTML = `<span class="acc-plat" style="min-width:88px;">${escapeHtml(p.blog || "")}</span>`
+    row.innerHTML = `<span class="acc-plat" style="min-width:84px;">${escapeHtml(p.blog || "")}</span>`
       + `<span class="nm">${escapeHtml(p.title || "(제목없음)")}</span>`
-      + `<span class="df" title="누적 조회수">👁 ${p.cumulative}</span>` + surge;
+      + `<span class="an-date">${fmtDateTime(p.published_at)}</span>`
+      + `<span class="df" title="누적 조회수">👁 ${p.cumulative}</span>` + deltaBadge + surgeBadge;
     if (p.url) { const a = document.createElement("a"); a.className = "mini"; a.href = p.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = "글 보기"; row.appendChild(a); }
     const cush = document.createElement("button"); cush.className = "mini primary-mini"; cush.innerHTML = `<iconify-icon icon="solar:link-linear"></iconify-icon> 쿠션글`; cush.addEventListener("click", () => openCushionFor(p.work_id)); row.appendChild(cush);
     box.appendChild(row);

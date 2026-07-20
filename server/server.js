@@ -585,26 +585,26 @@ app.post("/api/destinations/delete", (req, res) => res.json({ ok: true, destinat
 // ---- 작업 항목(칸반) ----
 app.get("/api/work", (req, res) => res.json({ items: DB.listWorkItems(req.userId, req.query.status) }));
 app.get("/api/by-draft", (req, res) => res.json(DB.workItemsByDraft(req.userId)));
-// 조회수 분석: 발행글 누적/최근증가(Δ)/급등배수
+// 조회수 분석: 발행글 누적 + 여러 기간(24/48/72/168h) Δ + 발행일시 (정렬/필터는 클라이언트)
 app.get("/api/analytics", (req, res) => {
-  const windowH = Math.max(1, Math.min(720, parseInt(req.query.window, 10) || 24));
-  const nowMs = Date.now(), winMs = windowH * 3600 * 1000;
-  const sinceIso = new Date(nowMs - (windowH * 2 * 3600 * 1000) - 3600 * 1000).toISOString();
+  const nowMs = Date.now();
+  const sinceIso = new Date(nowMs - 15 * 86400 * 1000).toISOString();   // 7일 창 계산 위해 넉넉히
   const snaps = DB.statSnapshotsSince(req.userId, sinceIso);
   const series = {}; for (const s of snaps) (series[s.work_id] = series[s.work_id] || []).push(s);
   const amap = {}; DB.accountsForGeneration(req.userId).forEach((a) => { amap[a.id] = a; });
   const viewsAt = (arr, tMs) => { let best = null; for (const s of arr) { const st = Date.parse(s.ts); if (st <= tMs && (!best || st > Date.parse(best.ts))) best = s; } return best ? best.views : (arr.length ? arr[0].views : 0); };
+  const WINS = [24, 48, 72, 168];
   const posts = DB.publishedForStats(req.userId).map((p) => {
     const arr = series[p.id] || [];
     const cur = arr.length ? arr[arr.length - 1].views : 0;
-    const t1 = viewsAt(arr, nowMs - winMs), t2 = viewsAt(arr, nowMs - 2 * winMs);
-    const dWin = Math.max(0, cur - t1), dPrev = Math.max(0, t1 - t2);
-    const surge = dPrev > 0 ? Math.round(dWin / dPrev * 10) / 10 : (dWin > 0 ? 99 : 0);
+    const deltas = {}; for (const h of WINS) deltas[h] = Math.max(0, cur - viewsAt(arr, nowMs - h * 3600 * 1000));
+    // 24시간 급등(최근 24h vs 그 이전 24h)
+    const prev24 = Math.max(0, deltas[48] - deltas[24]);
+    const surge24 = prev24 > 0 ? Math.round(deltas[24] / prev24 * 10) / 10 : (deltas[24] > 0 ? 99 : 0);
     const acc = amap[p.destination_id] || {};
-    return { work_id: p.id, title: p.title, url: p.published_url, blog: acc.name || p.target, cumulative: cur, delta: dWin, surge, samples: arr.length };
+    return { work_id: p.id, title: p.title, url: p.published_url, blog: acc.name || p.target, destination_id: p.destination_id, published_at: p.updated_at || p.created_at || "", cumulative: cur, deltas, surge24, samples: arr.length };
   });
-  posts.sort((a, b) => b.delta - a.delta || b.cumulative - a.cumulative);
-  res.json({ window: windowH, posts, collecting: snaps.length > 0, lastAt: DB.lastStatTs(req.userId) });
+  res.json({ windows: WINS, posts, collecting: snaps.length > 0, lastAt: DB.lastStatTs(req.userId) });
 });
 app.get("/api/work/:id", (req, res) => { const w = DB.getWorkItem(req.userId, req.params.id); w ? res.json(w) : res.status(404).json({ error: "not found" }); });
 app.post("/api/work", (req, res) => res.json({ ok: true, id: DB.upsertWorkItem(req.userId, req.body || {}) }));

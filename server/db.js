@@ -262,7 +262,7 @@ export function nicheList(userId) {
 // ---- 조회수 스냅샷(발행글 시계열) ----
 // 발행된 워드프레스 글(수집 대상): published_id 있는 것
 export function publishedForStats(userId) {
-  return db.prepare("SELECT id,target,destination_id,title,published_url,published_id FROM work_items WHERE user_id=? AND status='published' AND published_id IS NOT NULL AND published_id<>'' AND target='wordpress'").all(uid(userId));
+  return db.prepare("SELECT id,target,destination_id,title,published_url,published_id,updated_at,created_at FROM work_items WHERE user_id=? AND status='published' AND published_id IS NOT NULL AND published_id<>'' AND target='wordpress'").all(uid(userId));
 }
 export function addStatSnapshot(userId, workId, views, ts) {
   db.prepare("INSERT INTO post_stats(user_id,work_id,ts,views) VALUES(?,?,?,?)").run(uid(userId), workId, ts, views | 0);
