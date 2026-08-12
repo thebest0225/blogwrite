@@ -48,7 +48,9 @@ async function resolveUser(req) {
 }
 app.get("/health", (req, res) => res.json({ ok: true }));
 app.use(async (req, res, next) => {
-  if (PUBLIC_PATHS.has(req.path) || req.path.startsWith("/lib/")) return next();
+  // /media/ 는 인증 없이 열어둔다 — 발행 시 목적지 WP 가 서버 대 서버로 이 URL 을 받아가고,
+  // 크롬 확장이 네이버에 올릴 때도 여기서 내려받는다. 쿠키가 없는 경로다.
+  if (PUBLIC_PATHS.has(req.path) || req.path.startsWith("/lib/") || req.path.startsWith("/media/")) return next();
   const userId = await resolveUser(req);
   if (userId) { req.userId = userId; return next(); }
   if (req.path.startsWith("/api/")) return res.status(401).json({ error: "MangoHub 로그인이 필요합니다.", login: LOGIN_URL });
@@ -57,16 +59,77 @@ app.use(async (req, res, next) => {
 
 app.use(express.static(path.join(__dirname, "public")));
 
+// ---- 생성 이미지 영구 보관소 (2026-08-12) ----------------------------------
+// KIE 가 돌려주는 URL(tempfile.aiquickdraw.com)은 며칠 뒤 만료된다. 그래서 발행 시점에
+// localizeBodyImages 로 목적지 WP 미디어에 옮겨왔는데, 네이버는 목적지 WP 가 없어서
+// 그 그물에 걸리지 않는다 — 초안을 며칠 묵히면 이미지가 죽는다.
+// → 이미지를 '만든 즉시' 우리 서버에 내려 박고, 그 URL 을 본문·블록에 쓴다.
+//   워드프레스 발행은 그대로 WP 미디어로 한 번 더 옮긴다(기존 동작 유지).
+const MEDIA_DIR = path.join(__dirname, "media");
+try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch {}
+const MEDIA_BASE = process.env.BW_PUBLIC_BASE || "https://write.mangois.love";
+app.use("/media", express.static(MEDIA_DIR, { maxAge: "30d", immutable: true }));
+
+// KIE PNG 는 장당 2MB 쯤 된다. 워드프레스로 발행되면 WP 미디어로 옮겨가므로 여기 사본은
+// 그때부터 필요 없어진다. 초안이 90일 넘게 대기하는 일은 없으니 그 이상 된 것만 지운다.
+// (WP 이관이 실패해 본문이 여기를 계속 가리키는 경우가 유일한 예외 — 그때는 위 경고 로그가 남는다.)
+const MEDIA_KEEP_DAYS = 90;
+function sweepMedia() {
+  const cutoff = Date.now() - MEDIA_KEEP_DAYS * 864e5;
+  let n = 0, bytes = 0;
+  try {
+    for (const f of fs.readdirSync(MEDIA_DIR)) {
+      const p = path.join(MEDIA_DIR, f);
+      try {
+        const st = fs.statSync(p);
+        if (st.mtimeMs < cutoff) { bytes += st.size; fs.unlinkSync(p); n++; }
+      } catch {}
+    }
+  } catch {}
+  if (n) console.log(`[sweepMedia] ${MEDIA_KEEP_DAYS}일 지난 이미지 ${n}개 삭제 (${Math.round(bytes / 1048576)}MB 회수)`);
+}
+setTimeout(sweepMedia, 60_000);
+setInterval(sweepMedia, 24 * 3600_000);
+
+// 원격 이미지를 내려받아 /media 에 저장하고 영구 URL 을 돌려준다. 실패하면 원본 URL 그대로.
+async function stashImage(url) {
+  if (!url || typeof url !== "string" || !/^https?:\/\//.test(url)) return url;
+  if (url.startsWith(MEDIA_BASE + "/media/")) return url;   // 이미 우리 것
+  try {
+    const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", Referer: "" } });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const mime = (r.headers.get("content-type") || "image/png").split(";")[0];
+    if (!/^image\//.test(mime)) throw new Error("이미지 아님: " + mime);
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (!buf.length) throw new Error("빈 파일");
+    const ext = (mime.split("/")[1] || "png").split("+")[0];
+    const fname = `bw-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    fs.writeFileSync(path.join(MEDIA_DIR, fname), buf);
+    const out = `${MEDIA_BASE}/media/${fname}`;
+    console.log(`[stashImage] ${Math.round(buf.length / 1024)}KB 보관: ${url.slice(0, 55)}… → ${out}`);
+    return out;
+  } catch (e) {
+    console.warn(`[stashImage] 실패(원본 유지): ${url.slice(0, 60)}… (${String(e.message || e).slice(0, 80)})`);
+    return url;
+  }
+}
+
 const KIE = process.env.KIE_API_KEY;
 const CHAT_MODEL = process.env.KIE_CHAT_MODEL || "claude-sonnet-5";
 const IMAGE_MODEL = process.env.KIE_IMAGE_MODEL || "gpt-image-2-text-to-image";
+// 폴백: KIE Gemini Flash 3.5 (OpenAI 호환 엔드포인트) — Sonnet5가 KIE에서 에러날 때 대체
+const GEMINI_CHAT_ENDPOINT = process.env.KIE_GEMINI_ENDPOINT || "https://api.kie.ai/gemini-3.1-pro/v1/chat/completions";
+const GEMINI_FLASH_ENDPOINT = "https://api.kie.ai/gemini-3-5-flash-openai/v1/chat/completions";
 const NAVER_ID = process.env.NAVER_CLIENT_ID, NAVER_SECRET = process.env.NAVER_CLIENT_SECRET;
 const WP_SITE = process.env.WP_SITE, WP_USER = process.env.WP_USER, WP_PASS = process.env.WP_APP_PASSWORD;
 const KIE_BASE = "https://api.kie.ai";
 // Claude 공식 API (웹서치 지원) — 글 생성용
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
-const DEFAULT_ENGINE = process.env.GEN_ENGINE || (ANTHROPIC_KEY ? "claude" : "kie");
+// 2026-08-06 정책: 모든 LLM 호출은 KIE 경유. 공식 Anthropic API 직접 호출 금지.
+//   ANTHROPIC_API_KEY 는 읽지 않는다 — 읽으면 DEFAULT_ENGINE 이 claude 로 튀어
+//   웹앱의 모든 글 생성이 공식 API 청구로 나갔다(실제 사고).
+const ANTHROPIC_KEY = "";
+const ANTHROPIC_MODEL = process.env.KIE_CHAT_MODEL || "claude-sonnet-5";
+const DEFAULT_ENGINE = "kie";
 const STORE = path.join(__dirname, "records.json");
 const DRAFTS = path.join(__dirname, "drafts.json");   // MCP로 받은 초안함 (MCP 서버와 공유)
 
@@ -100,23 +163,57 @@ async function kieChat({ system, user, maxTokens, temperature, model, prefillJso
   if (prefillJson && content) { content = content.replace(/^\s*/, ""); if (!content.startsWith("{")) content = "{" + content; }
   return content;
 }
-// ---- 글 생성 (Claude 공식 API, 웹서치 O) ----
-async function anthropicChat({ system, user, maxTokens = 16000, model, webSearch = true, apiKey }) {
-  const body = { model: model || ANTHROPIC_MODEL, max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] };
-  if (webSearch) body.tools = [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }];
-  const r = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "x-api-key": apiKey || ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify(body)
-  });
+// ---- 폴백 생성 (KIE Gemini Flash 3.5, OpenAI 호환) ----
+async function geminiChat({ system, user, maxTokens = 16000, temperature = 0.8, prefillJson, apiKey, endpoint }) {
+  const _ep = endpoint || GEMINI_CHAT_ENDPOINT;
+  const messages = [];
+  if (system) messages.push({ role: "system", content: system });
+  messages.push({ role: "user", content: user + (prefillJson ? "\n\n반드시 코드펜스 없이 JSON 객체만 출력하세요. 응답은 { 로 시작해야 합니다." : "") });
+  // Pro(추론모델): 추론에 예산을 다 써 빈 출력이 나는 것 방지 → reasoning_effort=low + 토큰 상향
+  const isPro = /pro/i.test(_ep);
+  const body = { messages, temperature, max_completion_tokens: isPro ? Math.max(maxTokens, 24000) : maxTokens, stream: false };
+  if (isPro) body.reasoning_effort = "low";
+  const r = await fetch(_ep, { method: "POST", headers: kieHeaders(apiKey), body: JSON.stringify(body) });
   const t = await r.text();
-  if (!r.ok) throw new Error(`Anthropic ${r.status}: ${t.slice(0, 180)}`);
-  let j; try { j = JSON.parse(t); } catch { throw new Error("Anthropic 응답 형식 오류"); }
-  const content = (j.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
-  if (!content.trim()) throw new Error("Anthropic 빈 응답");
+  if (!r.ok || /^\s*<(?:!doctype|html)/i.test(t)) throw new Error(`Gemini 게이트웨이 오류(${r.status})`);
+  let j; try { j = JSON.parse(t); } catch { throw new Error("Gemini 응답 형식 오류"); }
+  const data = j.data && j.data.choices ? j.data : j;
+  let content = data?.choices?.[0]?.message?.content || "";
+  if (!content || /^\s*<(?:!doctype|html)/i.test(content)) throw new Error("Gemini 빈/비정상 응답");
+  if (prefillJson) {
+    content = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+    const i = content.indexOf("{"); if (i > 0) content = content.slice(i);
+    if (!content.startsWith("{")) content = "{" + content;
+  }
   return content;
 }
+// ---- 글 생성 ----
+// ⚠️ 2026-08-06 정책: 모든 LLM 호출은 KIE 경유. 공식 Anthropic API 직접 호출 금지.
+//    이전에는 여기서 api.anthropic.com 을 직접 불렀고, GEN_ENGINE 과 무관하게
+//    아래 세 곳(대화 생성 / 수동 초안 / 예약 초안)이 전부 이 함수를 타서
+//    매일 자동 초안이 공식 API 청구로 나갔다 → 충전금 소진.
+//    이름은 호출처 호환을 위해 유지하되 내부는 KIE 로 보낸다.
+//    ※ 웹서치(web_search 툴)는 KIE claude 엔드포인트가 지원하지 않아 빠졌다.
+//      최신 정보가 필요한 초안은 검색 결과를 프롬프트에 직접 넣는 방식으로 별도 처리해야 한다.
+async function anthropicChat({ system, user, maxTokens = 16000, model, webSearch = true, apiKey }) {
+  const kKey = KIE;   // 공식 키 대신 KIE 키를 쓴다 (apiKey 인자는 무시)
+  if (!kKey) throw new Error("KIE_API_KEY 가 없습니다 — 설정에서 KIE 키를 입력하세요.");
+  return await kieChat({
+    system, user, maxTokens,
+    temperature: 0.8,
+    model: model || CHAT_MODEL,
+    prefillJson: false,          // 초안은 자유 서술이라 JSON 프리필을 쓰지 않는다
+    apiKey: kKey,
+  });
+}
 
+// JSON 파싱 가능 여부(거부문/잘림 감지) — prefillJson 응답 검증용
+function _isParseableJson(raw) {
+  let t = String(raw || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+  const s = t.indexOf("{"), e = t.lastIndexOf("}");
+  if (s < 0 || e <= s) return false;
+  try { JSON.parse(t.slice(s, e + 1)); return true; } catch { return false; }
+}
 async function runChat(userId, p) {
   const { system, user, maxTokens = 16000, temperature = 0.8, model, prefillJson = true, engine } = p || {};
   const aKey = DB.getSecret(userId, "anthropicKey") || ANTHROPIC_KEY;
@@ -129,7 +226,10 @@ async function runChat(userId, p) {
       content = useClaude
         ? await anthropicChat({ system, user, maxTokens, webSearch: true, apiKey: aKey })
         : await kieChat({ system, user, maxTokens, temperature, model, prefillJson, apiKey: kKey });
-      if (content && content.trim()) break;
+      if (content && content.trim()) {
+        if (!prefillJson || _isParseableJson(content)) break;   // 정상 JSON 응답
+        lastErr = new Error("모델이 JSON 대신 거부/비정상 응답 → 폴백"); content = ""; break;   // claude계열 재시도 무의미 → Gemini 폴백으로
+      }
       lastErr = new Error("빈 응답");
     } catch (e) {
       lastErr = e;
@@ -137,7 +237,14 @@ async function runChat(userId, p) {
     }
   }
   if (content && content.trim()) return content;
-  throw new Error("AI 응답 실패(잠시 후 다시). " + (lastErr ? String(lastErr.message || lastErr).slice(0, 120) : ""));
+  // 폴백: Sonnet5(및 Claude)가 실패하면 Gemini Flash 3.5로 대체
+  try {
+    console.warn("[chat] 기본 모델 실패 → Gemini Flash 3.5 폴백:", lastErr ? String(lastErr.message || lastErr).slice(0, 120) : "");
+    const g = await geminiChat({ system, user, maxTokens, temperature, prefillJson, apiKey: kKey });
+    if (g && g.trim()) return g;
+    lastErr = new Error("Gemini 빈 응답");
+  } catch (e) { lastErr = e; }
+  throw new Error("AI 응답 실패(Sonnet5·Gemini 폴백 모두 실패). " + (lastErr ? String(lastErr.message || lastErr).slice(0, 120) : ""));
 }
 // 동기 버전(짧은 호출용, 하위호환)
 app.post("/api/chat", async (req, res) => {
@@ -187,7 +294,7 @@ async function runImageJob(model, input, apiKey) {
   throw new Error("이미지 시간초과");
 }
 app.post("/api/image", async (req, res) => {
-  try { const kKey = DB.getSecret(req.userId, "kieKey") || KIE; const { prompt, aspect = "4:3", resolution = "1K" } = req.body; res.json({ url: await runImageJob(IMAGE_MODEL, { prompt, aspect_ratio: aspect, resolution }, kKey) }); }
+  try { const kKey = DB.getSecret(req.userId, "kieKey") || KIE; const { prompt, aspect = "4:3", resolution = "1K" } = req.body; res.json({ url: await stashImage(await runImageJob(IMAGE_MODEL, { prompt, aspect_ratio: aspect, resolution }, kKey)) }); }
   catch (e) { res.status(500).json({ error: String(e) }); }
 });
 // 서버(자동·예약 발행)용 이미지 생성 — 썸네일(ai_full: 한글 헤드라인 포함) + 본문 1장까지
@@ -201,18 +308,37 @@ async function genArticleImagesServer(article, kKey, thumbStyleOv, opts = {}) {
   for (const b of imgs) {
     const isThumb = b.slot === "thumbnail";
     const headline = (b.overlayText || article.title || article.keyword || "").slice(0, 40);
-    let prompt = b.prompt || b.alt || article.keyword || "";
     let aspect = isThumb ? thumbAspect : bodyAspect;
     const [aw, ah] = aspect.split(":").map(Number);
     const res = (resolution === "4K" && aw === ah) ? "2K" : resolution;   // 정사각 4K는 미지원 → 2K
-    if (isThumb) { prompt = `${thumbStyleOv || SERVER_THUMB}\n\nScene: ${b.prompt || article.keyword || ""}\n\n상단 영역에 큰 한글 헤드라인을 정확한 맞춤법으로 크게: "${headline}". 하단 1/3은 비워둔다. 작은 모바일 썸네일에서도 읽히게. 클립아트·깨진 글자 금지.`; }
-    try { b.resolvedUrl = await runImageJob(IMAGE_MODEL, { prompt, aspect_ratio: aspect, resolution: res }, kKey); } catch (e) { /* 실패한 이미지는 건너뜀 */ }
+    // 재생성용 메타 저장(편집기에서 '원래 프롬프트로 AI 생성' 지원). _genPrompt 은 텍스트 없는 스타일+장면(오버레이는 별도).
+    const styleScene = isThumb ? `${thumbStyleOv || SERVER_THUMB}\n\nScene: ${b.prompt || article.keyword || ""}` : (b.prompt || b.alt || article.keyword || "");
+    const SAFE_RULE = " 안전 규칙(매우 중요): 폭력·무기·유혈·시신·상해·범죄 행위 자체를 절대 묘사하지 말 것. 어둡고 진중한 '상징적 분위기'(배경·사물·조명)만으로 표현. (Do NOT depict any violence, weapons, blood, wounds, injured/dead bodies, or the criminal act — only a somber symbolic news-editorial mood.)";
+    const prompt = isThumb
+      ? `${styleScene}\n\n이 한글 헤드라인 문구를 이미지에 크게 넣어라(정확한 맞춤법): "${headline}". 문구의 위치·폰트·색·스타일·레이아웃은 이미지 분위기에 가장 잘 어울리게 자유롭게 디자인하되, 글자가 잘리지 않고 배경과 또렷이 대비되어 작은 모바일 썸네일에서도 잘 읽히게. 깨진 글자·오탈자 금지.${SAFE_RULE}`
+      : (b.prompt || b.alt || article.keyword || "");
+    // 썸네일은 '헤드라인 포함' 프롬프트를 저장 → 편집기 재생성 시에도 문구가 이미지에 나온다
+    b._isThumb = isThumb; b._headline = headline; b._aspect = aspect; b._genPrompt = isThumb ? prompt : styleScene;
+    try { b.resolvedUrl = await runImageJob(IMAGE_MODEL, { prompt, aspect_ratio: aspect, resolution: res }, kKey); }
+    catch (e) {
+      // 이미지 정책 거부(범죄 소재 등) → 폭력 묘사 없는 안전한 분위기 썸네일로 폴백(문구는 유지)
+      if (isThumb) {
+        const safePrompt = `Serious Korean news-magazine thumbnail, dark moody atmospheric editorial background (abstract textures, dim cinematic light), high contrast, somber symbolic mood. Absolutely NO violence, weapons, blood, wounds, bodies, or crime-act depiction.\n\n이 한글 헤드라인 문구를 이미지에 크게 넣어라(정확한 맞춤법): "${headline}". 위치·폰트·색·레이아웃은 분위기에 어울리게 자유롭게, 글자가 잘리지 않고 또렷이 읽히게. 깨진 글자 금지.`;
+        try { b.resolvedUrl = await runImageJob(IMAGE_MODEL, { prompt: safePrompt, aspect_ratio: aspect, resolution: res }, kKey); if (b.resolvedUrl) b._genPrompt = safePrompt; } catch (e2) { /* 그래도 실패면 편집기에서 수동 재생성 */ }
+      }
+    }
   }
-  // 여전히 URL 없는 이미지 블록은 제거(빈 자리표시 방지)
-  article.blocks = (article.blocks || []).filter((b) => b.type !== "image" || b.resolvedUrl);
+  // ★KIE 임시 URL 을 우리 서버로 옮긴다. 여기서 한 번 처리하면 이 아래로 흐르는
+  //   본문 html·article_json·편집기 미리보기가 모두 영구 URL 을 쓴다.
+  //   (네이버 초안은 목적지 WP 가 없어서 발행 시점 로컬화의 그물에 걸리지 않는다.)
+  for (const b of (article.blocks || [])) {
+    if (b.type === "image" && b.resolvedUrl) b.resolvedUrl = await stashImage(b.resolvedUrl);
+  }
+  // 본문 이미지는 실패 시 제거(빈 자리표시 방지). 단, 썸네일 블록은 실패해도 남겨 편집기에서 AI 재생성 가능하게.
+  article.blocks = (article.blocks || []).filter((b) => b.type !== "image" || b.resolvedUrl || b.slot === "thumbnail");
 }
 app.post("/api/image-edit", async (req, res) => {
-  try { const kKey = DB.getSecret(req.userId, "kieKey") || KIE; const { imageUrl, prompt, aspect = "4:3", resolution = "1K" } = req.body; res.json({ url: await runImageJob("gpt-image-2-image-to-image", { prompt, input_urls: [imageUrl], aspect_ratio: aspect, resolution }, kKey) }); }
+  try { const kKey = DB.getSecret(req.userId, "kieKey") || KIE; const { imageUrl, prompt, aspect = "4:3", resolution = "1K" } = req.body; res.json({ url: await stashImage(await runImageJob("gpt-image-2-image-to-image", { prompt, input_urls: [imageUrl], aspect_ratio: aspect, resolution }, kKey)) }); }
   catch (e) { res.status(500).json({ error: String(e) }); }
 });
 
@@ -346,11 +472,128 @@ async function wpResolveCategory(site, auth, name) {
   } catch {}
   return null;
 }
+// 목적지 WP 블로그의 "실제 카테고리명" 목록 조회 (자동 분류용). 있으면 그 목록으로 AI가 분류 → 발행 시 정확 매칭(신규 생성/오염 방지).
+// 없거나(카테고리 미보유) 워드프레스가 아니면 null → 기본 카테고리 목록 폴백(기존 동작 유지).
+const _wpCatCache = new Map();   // site -> { at, names }
+// 목적지 워드프레스의 실제 카테고리(부모/글수 포함) — 공개 GET, 5분 캐시
+async function wpCategoriesRaw(userId, acc) {
+  try {
+    if (!acc || acc.platform !== "wordpress") return null;
+    const wp = resolveWp(userId, acc.id);
+    if (!wp || !wp.site) return null;
+    const cached = _wpCatCache.get(wp.site);
+    if (cached && Date.now() - cached.at < 5 * 60 * 1000) return cached.raw;
+    const headers = {};
+    if (wp.user && wp.pass) headers.Authorization = "Basic " + Buffer.from(`${wp.user}:${String(wp.pass).replace(/\s+/g, "")}`).toString("base64");
+    const r = await fetch(`${wp.site}/wp-json/wp/v2/categories?per_page=100&orderby=name&order=asc&_fields=id,name,count,parent`, { headers, signal: AbortSignal.timeout(15000) });
+    if (!r.ok) return null;
+    const arr = await r.json();
+    const skip = new Set(["미분류", "Uncategorized", "uncategorized"]);
+    const raw = (Array.isArray(arr) ? arr : [])
+      .filter((c) => c && String(c.name || "").trim() && !skip.has(String(c.name).trim()))
+      .map((c) => ({ id: c.id, name: String(c.name).trim(), count: c.count || 0, parent: c.parent || 0 }));
+    _wpCatCache.set(wp.site, { at: Date.now(), raw });
+    return raw;
+  } catch { return null; }
+}
+// 자동분류 프롬프트용 — 글 많은 순 이름 상위 40개(기존 동작 유지)
+async function wpCategoryNamesForAcc(userId, acc) {
+  const raw = await wpCategoriesRaw(userId, acc);
+  if (!raw) return null;
+  const names = raw.slice().sort((a, b) => b.count - a.count).map((c) => c.name).slice(0, 40);
+  return names.length ? names : null;
+}
+// 피커 표시용 — 부모→자식 순서 + depth(들여쓰기용)
+function wpCategoryTree(raw) {
+  if (!raw || !raw.length) return [];
+  const byParent = new Map();
+  for (const c of raw) { const p = c.parent || 0; if (!byParent.has(p)) byParent.set(p, []); byParent.get(p).push(c); }
+  for (const [, a] of byParent) a.sort((x, y) => String(x.name).localeCompare(String(y.name), "ko"));
+  const out = [];
+  const walk = (pid, depth) => { for (const c of (byParent.get(pid) || [])) { out.push({ name: c.name, depth, count: c.count }); walk(c.id, depth + 1); } };
+  walk(0, 0);
+  return out;
+}
+
 // 오구 서브사이트는 앱비번 계정(오구온지기/oguadmin)이 아니라 니치 필자 계정으로 저자 표기
 const OGU_AUTHORS = { benefit: 10, ott: 11, money: 12, pet: 13, apptip: 14, soft: 15, trend: 16, mango: 2 };
 function oguAuthorFor(site) {
   const m = String(site || "").match(/^https?:\/\/([a-z0-9]+)\.oguonline\.com/i);
   return m && OGU_AUTHORS[m[1]] ? OGU_AUTHORS[m[1]] : null;
+}
+
+// ---- 본문 외부 이미지 로컬화 (2026-08-04) ----------------------------------
+// 사고: 이미지 생성(KIE)이 돌려준 임시 CDN URL(tempfile.aiquickdraw.com)을 본문 <img src>에
+//   그대로 박아 발행했다. 그 CDN이 파일을 만료시켜 오구온라인 126글 중 67글(53%)의
+//   본문 이미지가 404가 됐다(애드센스 심사에 그대로 노출되는 하자).
+// 대책: 발행 직전에 본문의 '휘발성 외부 이미지'를 목적지 WP 미디어로 업로드하고 src 를 교체.
+//   → 우리 서버(목적지 WP)에서 서빙되므로 다시는 죽지 않는다.
+const VOLATILE_IMG_HOSTS = [
+  "tempfile.aiquickdraw.com",   // KIE 임시 저장소
+  "tempfile.redpandaai.co",
+  "oaidalleapiprodscus.blob.core.windows.net",   // OpenAI 이미지 (서명 URL, 만료됨)
+  "filesystem.site",
+];
+
+function isVolatileImg(u) {
+  try { return VOLATILE_IMG_HOSTS.some((h) => String(u).includes(h)); } catch { return false; }
+}
+
+// 우리 /media 보관소 URL. 만료되지 않지만, 워드프레스 발행 시엔 예전처럼 WP 미디어로
+// 한 번 더 옮긴다(글과 이미지가 같은 도메인에 있는 게 좋고 우리 서버 트래픽도 아낀다).
+// 옮기기가 실패하면 지우지 말고 그대로 둔다 — 이미 영구 URL 이니까.
+function isOurMediaImg(u) {
+  try { return String(u).includes("/media/bw-"); } catch { return false; }
+}
+
+async function uploadImageToWp(site, auth, imgUrl) {
+  const r = await fetch(imgUrl, { headers: { "User-Agent": "Mozilla/5.0", Referer: "" } });
+  if (!r.ok) throw new Error("원본 다운로드 실패 " + r.status);
+  const mime = (r.headers.get("content-type") || "image/png").split(";")[0];
+  if (!/^image\//.test(mime)) throw new Error("이미지 아님: " + mime);
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (!buf.length) throw new Error("빈 파일");
+  const ext = (mime.split("/")[1] || "png").split("+")[0];
+  const fname = "bw-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7) + "." + ext;
+  const up = await fetch(`${site}/wp-json/wp/v2/media`, {
+    method: "POST",
+    headers: { Authorization: auth, "Content-Type": mime, "Content-Disposition": `attachment; filename="${fname}"` },
+    body: buf,
+  });
+  const j = await up.json().catch(() => ({}));
+  if (!up.ok || !j.source_url) throw new Error(j.message || "업로드 실패 " + up.status);
+  return j.source_url;
+}
+
+// 본문 HTML 안의 휘발성 이미지 src 를 목적지 WP 로 옮기고 교체한 HTML 을 반환.
+// 실패한 이미지는 <img> 태그를 제거한다(깨진 이미지를 남기지 않는다).
+async function localizeBodyImages(html, site, auth) {
+  if (!html || typeof html !== "string") return html;
+  const srcs = [...html.matchAll(/<img\b[^>]*?src="([^"]+)"[^>]*>/gi)]
+    .map((m) => m[1])
+    .filter((u) => isVolatileImg(u) || isOurMediaImg(u));
+  const uniq = [...new Set(srcs)];
+  if (!uniq.length) return html;
+  let out = html;
+  for (const old of uniq) {
+    try {
+      const fresh = await uploadImageToWp(site, auth, old);
+      out = out.split(old).join(fresh);
+      console.log(`[localizeBodyImages] 로컬화 OK: ${old.slice(0, 60)}… → ${fresh}`);
+    } catch (e) {
+      // 우리 /media 보관소 URL 이면 만료되지 않으므로 그대로 둔다 (지우면 오히려 손해)
+      if (isOurMediaImg(old)) {
+        console.warn(`[localizeBodyImages] WP 이관 실패 — 우리 서버 URL 유지: ${old.slice(0, 70)}`);
+        continue;
+      }
+      // 임시 CDN 이 이미 만료된 경우 등 → 그 이미지 태그를 제거 (깨진 채로 발행하지 않는다)
+      const esc = old.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      out = out.replace(new RegExp(`<a\\b[^>]*>\\s*<img\\b[^>]*src="${esc}"[^>]*/?>\\s*(?:<span\\b[^>]*>.*?</span>\\s*)?</a>`, "gis"), "");
+      out = out.replace(new RegExp(`<img\\b[^>]*src="${esc}"[^>]*/?>`, "gi"), "");
+      console.warn(`[localizeBodyImages] 로컬화 실패 → 태그 제거: ${old.slice(0, 60)}… (${String(e.message || e).slice(0, 80)})`);
+    }
+  }
+  return out;
 }
 
 app.post("/api/wp", async (req, res) => {
@@ -370,7 +613,14 @@ app.post("/api/wp", async (req, res) => {
       } catch {}
       if (!postId) return res.status(400).json({ error: "원격 글을 찾지 못했습니다(URL로 매칭 실패). 새 글로 발행하거나 URL을 확인하세요." });
     }
-    const postBody = { title, content };
+    // 🖼️ 본문 휘발성 외부 이미지를 목적지 WP 미디어로 로컬화 (임시 CDN 만료로 이미지가 죽는 것 방지)
+    let _content = content;
+    try {
+      _content = await localizeBodyImages(content, wp.site, auth);
+    } catch (e) {
+      console.warn("[/api/wp] 이미지 로컬화 건너뜀:", String(e.message || e).slice(0, 120));
+    }
+    const postBody = { title, content: _content };
     if (String(wp.site).includes("oguonline.com")) postBody.meta = { _ogu_src: "blogwrite" };   // 오구 알림 출처 태그
     const _oguAuthor = oguAuthorFor(wp.site); if (_oguAuthor) postBody.author = _oguAuthor;      // 니치 필자로 저자 표기
     if (!postId) postBody.status = status;   // 신규만 status 지정(업데이트 시 기존 상태 유지)
@@ -404,7 +654,7 @@ app.post("/api/remote-post", async (req, res) => {
       if (!id) throw new Error("원격 글 ID를 찾지 못했습니다.");
       const r = await fetch(`${wp.site}/wp-json/wp/v2/posts/${id}?context=edit`, { headers: { Authorization: auth } });
       const j = await r.json(); if (!r.ok) throw new Error(j.message || r.status);
-      return res.json({ id, title: (j.title?.raw ?? j.title?.rendered ?? "").toString(), html: (j.content?.rendered ?? j.content?.raw ?? "").toString() });
+      return res.json({ id, title: (j.title?.raw ?? j.title?.rendered ?? "").toString(), html: (j.content?.rendered ?? j.content?.raw ?? "").toString(), raw: (j.content?.raw ?? "").toString() });
     }
     if (dest.platform === "blogger") {
       const rt = dest.creds?.refreshToken, blogId = dest.creds?.blogId; if (!rt || !blogId) throw new Error("블로거 미연결");
@@ -450,8 +700,16 @@ app.post("/api/wp-media", async (req, res) => {
 // ---- 초안(웹서치) 백그라운드 생성: 긴 요청이 Cloudflare 터널 타임아웃 나지 않게 job+폴링 ----
 const draftJobs = new Map();
 app.post("/api/draft/start", (req, res) => {
-  const aKey = DB.getSecret(req.userId, "anthropicKey") || ANTHROPIC_KEY;
-  if (!aKey) return res.status(400).json({ error: "Anthropic 키가 필요합니다(설정에서 입력)." });
+  // 2026-08-06: 이 경로는 '실시간 웹서치 초안'이 목적이었고 그건 Anthropic 공식 API의
+  //   web_search 툴로만 됐다. KIE claude 엔드포인트는 웹서치를 지원하지 않아 대체 불가.
+  //   공식 API 직접 호출은 금지(충전금 소진) → 같은 일을 하는 claude.ai 루틴으로 넘긴다.
+  //   루틴이 MCP submit_draft 로 초안함에 넣어주고 있다(초안 156건 중 155건이 그 경로).
+  return res.status(410).json({
+    error: "웹서치 초안 생성은 claude.ai 루틴으로 이전됐습니다.",
+    detail: "실시간 웹서치는 공식 Anthropic API 전용 기능이라 KIE 로 대체할 수 없습니다. "
+          + "claude.ai 예약 루틴이 매일 니치별 초안을 웹서치로 만들어 초안함에 넣습니다. "
+          + "초안함에서 골라 편집·발행해 주세요.",
+  });
   const { keyword, reference } = req.body || {};
   if (!keyword || !String(keyword).trim()) return res.status(400).json({ error: "키워드가 필요합니다." });
   const id = "dj_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -542,7 +800,21 @@ app.post("/api/blogger", async (req, res) => {
     const url = postId
       ? `https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts/${postId}`
       : `https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts/${isDraft ? "?isDraft=true" : ""}`;
-    const r = await fetch(url, { method: postId ? "PUT" : "POST", headers: { Authorization: "Bearer " + access, "Content-Type": "application/json" }, body: JSON.stringify(postId ? { id: postId, title, content } : { title, content }) });
+    // 내용 기반 라벨(카테고리+태그) — 클라이언트가 article 에서 뽑아 보냄. 최대 20개, 공백 제거.
+    const labels = Array.isArray(req.body.labels)
+      ? [...new Set(req.body.labels.map((s) => String(s || "").trim()).filter(Boolean))].slice(0, 20)
+      : undefined;
+    const postBody = postId ? { id: postId, title, content } : { title, content };
+    if (labels && labels.length) postBody.labels = labels;   // 블로거는 labels 배열로 라벨 지정
+    postBody.readerComments = "DONT_ALLOW_HIDE_EXISTING";    // 댓글 허용 안 함(기존 숨김) — 글 단위 옵션
+    const method = postId ? "PUT" : "POST";
+    const hdrs = { Authorization: "Bearer " + access, "Content-Type": "application/json" };
+    let r = await fetch(url, { method, headers: hdrs, body: JSON.stringify(postBody) });
+    if (!r.ok && postBody.readerComments) {
+      // 일부 계정/상황에서 readerComments 미지원 시 발행 자체가 실패하지 않도록 필드 빼고 1회 재시도
+      const { readerComments, ...noRc } = postBody;
+      r = await fetch(url, { method, headers: hdrs, body: JSON.stringify(noRc) });
+    }
     const j = await r.json(); if (!r.ok) throw new Error(j.error?.message || r.status);
     res.json({ id: j.id, link: j.url });
   } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
@@ -558,7 +830,7 @@ app.get("/api/drafts", (req, res) => res.json(DB.listDraftsPage(req.userId, { q:
 app.get("/api/drafts/:id", (req, res) => { const d = DB.getDraft(req.userId, req.params.id); d ? res.json(d) : res.status(404).json({ error: "not found" }); });
 app.post("/api/drafts", (req, res) => res.json({ ok: true, draft: DB.addDraft(req.userId, req.body || {}) }));
 app.post("/api/drafts/delete", (req, res) => { if (req.body?.id) DB.deleteDraft(req.userId, req.body.id); res.json({ ok: true }); });
-app.post("/api/drafts/status", (req, res) => { if (req.body?.id) DB.setDraftStatus(req.userId, req.body.id, req.body.status); res.json({ ok: true }); });
+app.post("/api/drafts/status", (req, res) => { if (req.body?.id) { DB.setDraftStatus(req.userId, req.body.id, req.body.status); if (req.body.status === "new") { try { _autoFails.delete(req.body.id); } catch {} } } res.json({ ok: true }); });
 // 키워드 대기열(예약형 클라우드 에이전트가 next_topic으로 소진)
 app.get("/api/topics", (req, res) => res.json({ topics: DB.listTopics(req.userId) }));
 app.post("/api/topics", (req, res) => { const k = (req.body?.keyword || "").trim(); if (!k) return res.status(400).json({ error: "키워드를 입력하세요." }); res.json({ ok: true, topic: DB.addTopic(req.userId, k, req.body?.note || "") }); });
@@ -581,6 +853,7 @@ app.post("/api/schedules/run", (req, res) => {
 app.get("/api/destinations", (req, res) => res.json({ destinations: DB.listDestinations(req.userId) }));
 app.post("/api/destinations", (req, res) => res.json({ ok: true, destinations: DB.upsertDestination(req.userId, req.body || {}) }));
 app.post("/api/destinations/delete", (req, res) => res.json({ ok: true, destinations: DB.deleteDestination(req.userId, req.body?.id) }));
+app.post("/api/destinations/enabled", (req, res) => { const b = req.body || {}; if (!b.id) return res.status(400).json({ error: "id 필요" }); res.json({ ok: true, destinations: DB.setDestinationEnabled(req.userId, b.id, !!b.enabled) }); });
 
 // ---- 작업 항목(칸반) ----
 app.get("/api/work", (req, res) => res.json({ items: DB.listWorkItems(req.userId, req.query.status) }));
@@ -608,7 +881,40 @@ app.get("/api/analytics", (req, res) => {
 });
 app.get("/api/work/:id", (req, res) => { const w = DB.getWorkItem(req.userId, req.params.id); w ? res.json(w) : res.status(404).json({ error: "not found" }); });
 app.post("/api/work", (req, res) => res.json({ ok: true, id: DB.upsertWorkItem(req.userId, req.body || {}) }));
+// 발행 시 카테고리 선택용 — 목적지 WP의 실제 카테고리명 목록
+app.get("/api/wp-categories", async (req, res) => {
+  try {
+    const destId = String(req.query.destinationId || "");
+    if (!destId) return res.json({ categories: [], tree: [] });
+    const acc = { platform: "wordpress", id: destId };
+    const raw = await wpCategoriesRaw(req.userId, acc);
+    const names = await wpCategoryNamesForAcc(req.userId, acc);
+    res.json({ categories: names || [], tree: wpCategoryTree(raw) });
+  } catch { res.json({ categories: [], tree: [] }); }
+});
 app.post("/api/work/delete", (req, res) => { if (req.body?.id) DB.deleteWorkItem(req.userId, req.body.id); res.json({ ok: true }); });
+// 실패한(또는 임의) 목적지 글 재생성 — 그 (초안×목적지)만 다시 생성해 같은 항목을 갱신
+app.post("/api/work/regenerate", async (req, res) => {
+  const w = req.body?.id ? DB.getWorkItem(req.userId, req.body.id) : null;
+  if (!w) return res.status(404).json({ error: "작업 항목을 찾을 수 없습니다." });
+  if (!w.draft_id || !w.destination_id) return res.status(400).json({ error: "재생성하려면 원본 초안·목적지 정보가 필요합니다." });
+  const draft = DB.getDraft(req.userId, w.draft_id);
+  if (!draft) return res.status(400).json({ error: "원본 초안이 삭제되어 재생성할 수 없습니다." });
+  const acc = DB.accountsForGeneration(req.userId).find((a) => a.id === w.destination_id);
+  if (!acc) return res.status(400).json({ error: "목적지를 찾을 수 없습니다(삭제됨)." });
+  const kKey = DB.getSecret(req.userId, "kieKey") || KIE;
+  if (!kKey) return res.status(400).json({ error: "KIE 키가 설정되지 않았습니다." });
+  const st = DB.getSettingsRaw(req.userId);
+  try {
+    const { article, html } = await genArticleForDest(req.userId, draft, acc, st, kKey, {});
+    DB.upsertWorkItem(req.userId, { id: w.id, draft_id: w.draft_id, target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated", note: "" });
+    tgMsg(req.userId, "generate", [`✍️ 재생성 완료 · <b>${tgEsc(acc.name || acc.platform)}</b>`, `📝 ${tgEsc(article.title)}`]);
+    res.json({ ok: true, id: w.id });
+  } catch (e) {
+    DB.upsertWorkItem(req.userId, { id: w.id, status: "failed", note: String(e.message || e).slice(0, 300) });
+    res.status(502).json({ error: "재생성 실패: " + String(e.message || e).slice(0, 150) });
+  }
+});
 // 예약 발행 설정/해제 (생성된 글을 지정 시각에 자동 발행)
 app.post("/api/work/schedule", (req, res) => {
   const { id, publish_at } = req.body || {};
@@ -696,7 +1002,14 @@ function parseArticle(raw) {
   if (s > 0 || e < t.length - 1) t = t.slice(s, e + 1);
   try { return JSON.parse(t); } catch { return null; }
 }
-async function publishServer(userId, acc, { title, content, category }) {
+// 내용 기반 블로거 라벨 — 태그(콘텐츠 키워드) 우선, 태그 없을 때만 카테고리 폴백. 자동/예약 발행용.
+function labelsFromArticle(a) {
+  if (!a) return [];
+  let out = Array.isArray(a.tags) ? a.tags.map((t) => String(t || "").trim()).filter(Boolean) : [];
+  if (!out.length && a.category) out = [String(a.category).trim()].filter(Boolean);
+  return [...new Set(out)].slice(0, 8);
+}
+async function publishServer(userId, acc, { title, content, category, labels }) {
   if (acc.platform === "wordpress") {
     const wp = resolveWp(userId, acc.id); if (!wp || !wp.site || !wp.user || !wp.pass) throw new Error("WP 자격 없음(응용프로그램 비밀번호 확인)");
     const auth = "Basic " + Buffer.from(`${wp.user}:${String(wp.pass).replace(/\s+/g, "")}`).toString("base64");
@@ -711,7 +1024,13 @@ async function publishServer(userId, acc, { title, content, category }) {
     const dest = DB.getDestination(userId, acc.id); const rt = dest?.creds?.refreshToken, blogId = dest?.creds?.blogId;
     if (!rt || !blogId) throw new Error("블로거 미연결");
     const access = await bloggerAccessToken(rt);
-    const r = await fetch(`https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts/`, { method: "POST", headers: { Authorization: "Bearer " + access, "Content-Type": "application/json" }, body: JSON.stringify({ title, content }) });
+    const postBody = { title, content, readerComments: "DONT_ALLOW_HIDE_EXISTING" };   // 댓글 허용 안 함
+    const lbl = Array.isArray(labels) ? [...new Set(labels.map((s) => String(s || "").trim()).filter(Boolean))].slice(0, 20) : [];
+    if (lbl.length) postBody.labels = lbl;
+    const bUrl = `https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts/`;
+    const bHdrs = { Authorization: "Bearer " + access, "Content-Type": "application/json" };
+    let r = await fetch(bUrl, { method: "POST", headers: bHdrs, body: JSON.stringify(postBody) });
+    if (!r.ok) { const { readerComments, ...noRc } = postBody; r = await fetch(bUrl, { method: "POST", headers: bHdrs, body: JSON.stringify(noRc) }); }   // readerComments 미지원 시 재시도
     const j = await r.json(); if (!r.ok) throw new Error(j.error?.message || r.status); return { link: j.url, id: j.id };
   }
   return null;
@@ -733,7 +1052,11 @@ async function runSchedule(s) {
     } else {
       keyword = (s.keywords || "").split(/[\n,]/)[0].trim();
       if (!keyword) throw new Error("키워드가 비어 있음");
-      if (!aKey) throw new Error("Anthropic 키 없음(초안 웹서치 생성 불가)");
+      // 2026-08-06: 키워드→초안 생성은 실시간 웹서치가 전제였고 KIE 로 대체 불가.
+      //   claude.ai 루틴이 같은 일을 하므로 이 경로는 막는다.
+      //   예약을 쓰려면 source="draft" 로 초안함의 초안을 지정해 발행만 시켜라.
+      throw new Error("키워드 자동 초안은 중단됐습니다 — claude.ai 루틴이 만든 초안함의 "
+                    + "초안을 예약(source=draft)으로 지정해 발행하세요.");
       const built = buildDraftPrompt({ keyword, today, audience: st.defaultAudience, tone: st.defaultTone });
       draftText = await anthropicChat({ system: built.system, user: built.user, maxTokens: 16000, apiKey: aKey });
       DB.addDraft(userId, { title: firstLine(draftText) || keyword, content: draftText, keyword, source: "scheduled" });
@@ -742,22 +1065,18 @@ async function runSchedule(s) {
     if (s.scope === "draft") { DB.setScheduleStatus(s.id, "done", `초안 생성 완료: ${keyword}`); return; }
     // 3) 목적지 생성 (계정별)
     if (!kKey) throw new Error("KIE 키 없음(목적지 생성 불가)");
-    let dests = DB.accountsForGeneration(userId).filter(isDestRoleRow);
+    let dests = DB.accountsForGeneration(userId).filter((a) => isDestRoleRow(a) && a.enabled !== false);   // 휴재(off) 계정 제외
     if (s.dest_id) dests = dests.filter((d) => d.id === s.dest_id);   // 특정 목적지만 지정 시
     if (!dests.length) throw new Error("목적지 계정이 없음(계정 관리에서 등록)");
     const groups = {}; dests.forEach((a) => { (groups[a.platform] = groups[a.platform] || []).push(a); });
     const idxIn = {}; let made = 0, pub = 0, lastLink = "";
     for (const acc of dests) {
       idxIn[acc.platform] = (idxIn[acc.platform] || 0) + 1;
-      const variant = { index: idxIn[acc.platform], total: groups[acc.platform].length, persona: acc.persona || "" };
+      const variant = { index: idxIn[acc.platform], total: groups[acc.platform].length, persona: acc.persona || "", structure: (acc.overrides || {}).structure || "" };
       const ov = acc.overrides || {};
-      const built = buildBloggerMain({ sourceText: draftText, keyword, audience: ov.audience || st.defaultAudience, tone: ov.tone || st.defaultTone, authorBio: ov.authorBio || st.authorBio, today, imageCount: 1, reference: "", internalLinks: [], variant });
-      let content = "";
-      for (let attempt = 0; attempt < 2 && !content; attempt++) {
-        try { content = await kieChat({ system: built.system, user: built.user, maxTokens: 16000, temperature: 0.8, model: CHAT_MODEL, prefillJson: true, apiKey: kKey }); }
-        catch (e) { if (attempt) throw e; await sleep(1200); }
-      }
-      const article = parseArticle(content);
+      const destCats = await wpCategoryNamesForAcc(userId, acc);   // 목적지 실제 카테고리로 자동분류
+      const built = buildBloggerMain({ sourceText: draftText, keyword, audience: ov.audience || st.defaultAudience, tone: ov.tone || st.defaultTone, authorBio: ov.authorBio || st.authorBio, today, imageCount: 1, reference: "", internalLinks: [], variant, categories: destCats || undefined });
+      const article = await genArticleJSON(built, kKey);
       if (!article) continue;
       article.today = today; article.keyword = keyword; const abio = ov.authorBio || st.authorBio; if (abio) article.authorBio = abio;
       try { await genArticleImagesServer(article, kKey, ov.thumbStyle || st.thumbnailStylePrompt, { resolution: st.imageResolution, thumbAspect: st.thumbAspect, bodyAspect: st.bodyAspect }); } catch {}
@@ -767,7 +1086,7 @@ async function runSchedule(s) {
       // 4) 발행 수준
       if (s.publish === "auto" && acc.has_creds) {
         try {
-          const pr = await publishServer(userId, acc, { title: article.title, content: html, category: article.category });
+          const pr = await publishServer(userId, acc, { title: article.title, content: html, category: article.category, labels: labelsFromArticle(article) });
           if (pr && pr.link) { DB.upsertWorkItem(userId, { id: wid, target: acc.platform, destination_id: acc.id, title: article.title || "", status: "published", published_url: pr.link, published_id: pr.id != null ? String(pr.id) : null, publish_mode: "scheduled" }); DB.addAsset(userId, { url: pr.link, title: article.title, keyword, excerpt: (html || "").replace(/<[^>]+>/g, " ").slice(0, 4000) }); pub++; lastLink = pr.link; tgMsg(userId, "publish", [`✅ 예약발행 완료 · <b>${tgEsc(acc.name || acc.platform)}</b>`, `📝 ${tgEsc(article.title)}`, `🔗 ${tgEsc(pr.link)}`]); }
         } catch (e) { tgMsg(userId, "error", [`❌ 예약발행 실패 · <b>${tgEsc(acc.name || acc.platform)}</b>`, `📝 ${tgEsc(article.title)}`, `⚠️ ${tgEsc(e.message || e)}`]); }
       }
@@ -788,13 +1107,79 @@ async function publishDueWorkItem(row) {
   if (acc.platform === "naver") { DB.setWorkPublishAt(userId, row.id, null); return; }
   try {
     const article = full.article || {};
-    const pr = await publishServer(userId, acc, { title: full.title, content: full.html, category: article.category });
+    const pr = await publishServer(userId, acc, { title: full.title, content: full.html, category: article.category, labels: labelsFromArticle(article) });
     if (pr && pr.link) {
       DB.upsertWorkItem(userId, { id: row.id, target: row.target, destination_id: row.destination_id, title: full.title || "", status: "published", published_url: pr.link, published_id: pr.id != null ? String(pr.id) : null, publish_mode: "scheduled" });
       DB.addAsset(userId, { url: pr.link, title: full.title, keyword: article.keyword || "", excerpt: (full.html || "").replace(/<[^>]+>/g, " ").slice(0, 4000) });
       tgMsg(userId, "publish", [`✅ 예약발행 완료 · <b>${tgEsc(acc.name || acc.platform)}</b>`, `📝 ${tgEsc(full.title)}`, `🔗 ${tgEsc(pr.link)}`]);
     }
   } catch (e) { console.error("[work publish]", row.id, e.message); DB.setWorkPublishAt(userId, row.id, null); tgMsg(userId, "error", [`❌ 예약발행 실패 · <b>${tgEsc(acc.name || acc.platform)}</b>`, `📝 ${tgEsc(full.title)}`, `⚠️ ${tgEsc(e.message || e)}`]); }  // 실패 시 예약 해제(무한 재시도 방지) — 작업보드에 남음
+}
+// 한 목적지에 대한 글 생성(초안→기사→이미지→HTML). 성공 시 {article, html}, 실패 시 throw.
+// processAutoDraft와 /api/work/regenerate가 공유.
+// 목적지 기사 JSON 생성 — Gemini(Flash) 우선. (KIE claude 계열이 SEO 프롬프트를 거부 중이라 기본 엔진 전환)
+// Gemini 2회 시도 실패 시에만 KIE claude 로 폴백. 파싱 성공한 article 반환, 전부 실패면 null.
+async function genArticleJSON(built, kKey) {
+  const cla   = async () => { try { const c = await kieChat({ system: built.system, user: built.user, maxTokens: 16000, temperature: 0.8, model: CHAT_MODEL, prefillJson: true, apiKey: kKey }); return parseArticle(c); } catch (e) { return null; } };
+  const pro   = async () => { try { const g = await geminiChat({ system: built.system, user: built.user, maxTokens: 16000, temperature: 0.8, prefillJson: true, apiKey: kKey }); return parseArticle(g); } catch (e) { return null; } };
+  const flash = async () => { try { const g = await geminiChat({ system: built.system, user: built.user, maxTokens: 16000, temperature: 0.8, prefillJson: true, apiKey: kKey, endpoint: GEMINI_FLASH_ENDPOINT }); return parseArticle(g); } catch (e) { return null; } };
+  // 순서: 소넷(완화 프롬프트로 정상) → Pro → Flash
+  let art = await cla(); if (art) return art;
+  art = await pro(); if (art) { console.warn("[gen] 소넷 실패 → Pro 폴백"); return art; }
+  art = await flash(); if (art) { console.warn("[gen] Pro 실패 → Flash 폴백"); return art; }
+  return null;
+}
+// ---- 네이버는 KIE 재작성을 건너뛴다 (2026-08-12) ----------------------------
+// 사고: 네이버 초안은 클로드 루틴이 '네이버 형식 그대로' 완성해 보낸 것인데,
+//   그걸 다시 genArticleJSON(KIE 소넷 → 제미나이 Pro → Flash)으로 재작성하고
+//   KIE 이미지까지 만들고 있었다. 결과물은 워드프레스 모양의 html 이라
+//   볼드 소제목·구분선·사진 슬롯·해시태그가 전부 뭉개졌고, 크롬 확장은 그걸 안 쓴다
+//   (초안 원본을 직접 파싱한다). 즉 KIE 비용만 태우고 아무도 안 읽는 데이터를 만들었다.
+// 대책: 목적지가 네이버면 재작성·이미지생성 없이 초안을 그대로 실어 보낸다.
+//   여기서 만드는 html 은 블로그라이터 웹UI 미리보기용일 뿐이다 — 확장은 초안을 쓴다.
+function naverArticleFromDraft(draft, opts = {}) {
+  const raw = String(draft.content || "");
+  const title = draft.title || firstLine(raw);
+  const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const html = raw.replace(/\r\n/g, "\n").split(/\n{2,}/).map((g) => {
+    const lines = g.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) return "";
+    if (lines.every((l) => /^[—–\-─]{3,}$/.test(l))) return "<hr>";
+    if (lines.length === 1 && /^\*\*.+\*\*$/.test(lines[0]))
+      return `<p><strong>${esc(lines[0].replace(/^\*\*|\*\*$/g, ""))}</strong></p>`;
+    return "<p>" + lines.map((l) => esc(l).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")).join("<br>") + "</p>";
+  }).join("");
+  return {
+    article: {
+      title,
+      keyword: opts.keyword || draft.keyword || "",
+      today: opts.today || new Date().toISOString().slice(0, 10),
+      type: "naver",
+      source: "draft-verbatim",   // ★KIE 를 타지 않았다는 표시
+      blocks: [],
+    },
+    html,
+  };
+}
+
+async function genArticleForDest(userId, draft, acc, st, kKey, opts = {}) {
+  // ★네이버: 초안이 이미 완성 원고다. 재작성하면 형식이 깨지고 KIE 비용만 나간다.
+  if (acc && (acc.platform === "naver" || acc.id === "naver_mango")) {
+    console.log(`[naver] KIE 재작성 건너뜀 — 초안 원본 그대로 (draft=${draft.id})`);
+    return naverArticleFromDraft(draft, opts);
+  }
+  const today = opts.today || new Date().toISOString().slice(0, 10);
+  const keyword = opts.keyword || draft.keyword || firstLine(draft.content);
+  const ov = acc.overrides || {};
+  const variant = { persona: acc.persona || "", index: opts.index || 1, total: opts.total || 1, structure: (acc.overrides || {}).structure || "" };
+  const destCats = await wpCategoryNamesForAcc(userId, acc);   // 목적지 실제 카테고리로 자동분류
+  const built = buildBloggerMain({ sourceText: draft.content || "", keyword, audience: ov.audience || st.defaultAudience, tone: ov.tone || st.defaultTone, authorBio: ov.authorBio || st.authorBio, today, imageCount: 1, reference: "", internalLinks: [], variant, categories: destCats || undefined });
+  const article = await genArticleJSON(built, kKey);
+  if (!article) { console.error(`[parse-fail] acc=${acc.id} — Gemini·KIE 모두 실패`); throw new Error("파싱 실패"); }
+  article.today = today; article.keyword = keyword; const abio = ov.authorBio || st.authorBio; if (abio) article.authorBio = abio;
+  try { await genArticleImagesServer(article, kKey, ov.thumbStyle || st.thumbnailStylePrompt, { resolution: st.imageResolution, thumbAspect: st.thumbAspect, bodyAspect: st.bodyAspect }); } catch {}
+  const html = buildHtml(article, { accent: st.overlayAccent || "#e11d48", linkMode: st.linkMode || "preserve", adEnabled: st.adEnabled, adCode: st.adCode }).html;
+  return { article, html };
 }
 // 초안 자동 처리: 들어온 초안 → 니치 매칭 목적지 글 생성 → 작업보드(발행 안 함)
 // 니치 토큰 분리: 콤마·줄바꿈·공백 모두 지원(목적지마다 저장 형식이 달라도 매칭되게)
@@ -804,7 +1189,7 @@ async function processAutoDraft(userId, draft) {
   const kKey = DB.getSecret(userId, "kieKey") || KIE;
   if (!kKey) return false;
   const st = DB.getSettingsRaw(userId);
-  const dests = DB.accountsForGeneration(userId).filter(isDestRoleRow);
+  const dests = DB.accountsForGeneration(userId).filter((a) => isDestRoleRow(a) && a.enabled !== false);   // 휴재(off) 계정 제외
   const text = ((draft.keyword || "") + " " + (draft.title || "") + " " + (draft.content || "").slice(0, 1200)).toLowerCase();
   const scored = dests.map((a) => ({ a, s: topicScore(a, text) })).filter((x) => x.s > 0).sort((x, y) => y.s - x.s);
   if (!scored.length) return -1;   // 니치 매칭 없음(소비 안 함, 다음 초안으로)
@@ -823,23 +1208,33 @@ async function processAutoDraft(userId, draft) {
   const today = new Date().toISOString().slice(0, 10);
   const keyword = draft.keyword || firstLine(draft.content);
   let made = 0;
+  const fails = [];   // 이번 회차 실패한 목적지들(부분 실패면 작업보드에 '실패' 항목으로 기록)
   for (const acc of list) {
     try {
-      const ov = acc.overrides || {};
-      const variant = { persona: acc.persona || "", index: made + 1, total: list.length };
-      const built = buildBloggerMain({ sourceText: draft.content || "", keyword, audience: ov.audience || st.defaultAudience, tone: ov.tone || st.defaultTone, authorBio: ov.authorBio || st.authorBio, today, imageCount: 1, reference: "", internalLinks: [], variant });
-      let content = "";
-      for (let attempt = 0; attempt < 3 && !content; attempt++) { try { content = await kieChat({ system: built.system, user: built.user, maxTokens: 16000, temperature: 0.8, model: CHAT_MODEL, prefillJson: true, apiKey: kKey }); } catch (e) { if (attempt === 2) throw e; await sleep(1500 * (attempt + 1)); } }
-      const article = parseArticle(content); if (!article) throw new Error("파싱 실패");
-      article.today = today; article.keyword = keyword; const abio = ov.authorBio || st.authorBio; if (abio) article.authorBio = abio;
-      try { await genArticleImagesServer(article, kKey, ov.thumbStyle || st.thumbnailStylePrompt, { resolution: st.imageResolution, thumbAspect: st.thumbAspect, bodyAspect: st.bodyAspect }); } catch {}
-      const html = buildHtml(article, { accent: st.overlayAccent || "#e11d48", linkMode: st.linkMode || "preserve", adEnabled: st.adEnabled, adCode: st.adCode }).html;
-      DB.upsertWorkItem(userId, { draft_id: draft.id, target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated" });
+      const { article, html } = await genArticleForDest(userId, draft, acc, st, kKey, { today, keyword, index: made + 1, total: list.length });
+      // 이전에 이 (초안×목적지)가 '실패'로 남아있으면 같은 행을 성공으로 승격
+      const prev = DB.findWorkItemByDraftDest(userId, draft.id, acc.id);
+      DB.upsertWorkItem(userId, { id: prev && prev.status === "failed" ? prev.id : undefined, draft_id: draft.id, target: acc.platform, destination_id: acc.id, title: article.title || "", article, html, status: "generated", note: "" });
       made++;
       tgMsg(userId, "generate", [`✍️ 초안 자동생성 완료 · <b>${tgEsc(acc.name || acc.platform)}</b>${list.length > 1 ? ` (${made}/${list.length})` : ""}`, `📝 ${tgEsc(article.title)}`, `작업보드에서 확인 후 발행하세요.`]);
-    } catch (e) { console.error("[auto-draft]", draft.id, acc.id, e.message); tgMsg(userId, "error", [`❌ 초안 자동생성 실패 · <b>${tgEsc(acc.name || acc.platform)}</b>`, `📥 ${tgEsc(draft.title || draft.keyword || draft.id)}`, `⚠️ ${tgEsc(e.message || e)}`]); }
+    } catch (e) {
+      console.error("[auto-draft]", draft.id, acc.id, e.message);
+      fails.push({ acc, err: String(e.message || e).slice(0, 300) });
+      tgMsg(userId, "error", [`❌ 초안 자동생성 실패 · <b>${tgEsc(acc.name || acc.platform)}</b>`, `📥 ${tgEsc(draft.title || draft.keyword || draft.id)}`, `⚠️ ${tgEsc(e.message || e)}`]);
+    }
   }
-  if (made > 0) DB.setDraftStatus(userId, draft.id, "used");   // 하나라도 생성돼야 소비(실패 시 초안 보존 → 다음 주기 재시도)
+  if (made > 0) {
+    DB.setDraftStatus(userId, draft.id, "used");   // 하나라도 성공하면 초안 소비
+    // 부분 실패한 목적지는 작업보드에 '실패' 항목으로 남겨 개별 재생성 가능하게(소실 방지)
+    for (const f of fails) {
+      const prev = DB.findWorkItemByDraftDest(userId, draft.id, f.acc.id);
+      if (!prev || prev.status === "failed") {
+        DB.upsertWorkItem(userId, { id: prev ? prev.id : undefined, draft_id: draft.id, target: f.acc.platform, destination_id: f.acc.id, title: draft.title || keyword || "(제목없음)", status: "failed", note: f.err });
+      }
+    }
+    if (fails.length) tgMsg(userId, "error", [`⚠️ ${fails.length}개 목적지 생성 실패 → 작업보드에 '실패'로 보관`, `📥 ${tgEsc(draft.title || keyword)}`, `작업보드에서 <b>↻ 재생성</b>을 누르세요.`]);
+  }
+  // made===0(전부 실패)이면 초안을 보존 → 초안함의 3-strike 로직이 'failed' 처리(통째로 재시도)
   return made;
 }
 const AUTO_INTERVAL = parseInt(process.env.AUTO_PROCESS_INTERVAL_MS, 10) || 10 * 60 * 1000;  // 초안 자동처리 간격(기본 10분)
@@ -896,7 +1291,7 @@ async function checkSchedules() {
         if (made < 0) continue;                               // 매칭 안 되는 초안은 건너뛰고 다음 초안 시도
         if (made === 0) {                                     // 매칭됐지만 생성 실패(KIE 등) → 초안 보존, 실패 카운트
           const n = (_autoFails.get(d.id) || 0) + 1; _autoFails.set(d.id, n);
-          if (n >= 3) { DB.setDraftStatus(d.user_id, d.id, "used"); _autoFails.delete(d.id); tgMsg(d.user_id, "error", [`⏭️ 초안 3회 연속 생성 실패로 건너뜀`, `📥 ${tgEsc(d.title || d.id)}`, `초안함에서 직접 확인해 주세요.`]); }
+          if (n >= 3) { DB.setDraftStatus(d.user_id, d.id, "failed"); _autoFails.delete(d.id); tgMsg(d.user_id, "error", [`⚠️ 초안 3회 연속 생성 실패 → 초안함에 '실패'로 <b>보관</b>(삭제 안 함)`, `📥 ${tgEsc(d.title || d.id)}`, `KIE가 정상일 때 초안함에서 <b>↻ 재시도</b>를 눌러 주세요.`]); }
         } else { _autoFails.delete(d.id); }                   // 성공(이미 'used' 처리됨)
         _lastAutoAt = Date.now();                             // 매칭된 초안 하나 시도했으면 이번 주기 종료(성공·실패 무관, 과부하 방지)
         break;
