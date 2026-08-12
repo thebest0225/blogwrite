@@ -7,6 +7,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import * as DB from "./db.js";
+import * as PB from "./playbook.js";
 import { tgMsg, tgEsc } from "./notify.js";
 import { buildDraftPrompt, buildBloggerMain } from "./public/lib/prompts.js";
 import { buildHtml } from "./public/lib/html-builder.js";
@@ -857,6 +858,46 @@ app.post("/api/destinations/enabled", (req, res) => { const b = req.body || {}; 
 
 // ---- 작업 항목(칸반) ----
 app.get("/api/work", (req, res) => res.json({ items: DB.listWorkItems(req.userId, req.query.status) }));
+
+// ---- 사이트 플레이북 (2026-08-13) ------------------------------------------
+// 지침을 DB 에 두고 웹에서 고친다. 루틴은 next_topic 으로 읽어가므로 수정이 바로 반영된다.
+app.get("/api/playbook", (req, res) => {
+  const site = (req.query.site || "").toString();
+  if (site) {
+    const pb = DB.getPlaybook(req.userId, site);
+    return res.json({ ...pb, rendered: PB.renderPlaybook(pb), order: PB.sectionOrder(), labels: PB.sectionOrder().reduce((a, k) => (a[k] = PB.sectionLabel(k), a), {}) });
+  }
+  res.json({ sites: DB.listPlaybookSites(req.userId), order: PB.sectionOrder(), labels: PB.sectionOrder().reduce((a, k) => (a[k] = PB.sectionLabel(k), a), {}) });
+});
+app.post("/api/playbook", (req, res) => {
+  const { site, section, body, sort, enabled } = req.body || {};
+  if (!site || !section) return res.status(400).json({ error: "site·section 필요" });
+  res.json(DB.upsertPlaybookSection(req.userId, site, section, body ?? "", { sort, enabled }));
+});
+app.post("/api/playbook/delete", (req, res) => {
+  const { site, section } = req.body || {};
+  if (!site || !section) return res.status(400).json({ error: "site·section 필요" });
+  res.json(DB.deletePlaybookSection(req.userId, site, section));
+});
+app.post("/api/playbook/enabled", (req, res) => {
+  const { site, enabled } = req.body || {};
+  if (!site) return res.status(400).json({ error: "site 필요" });
+  res.json(DB.setPlaybookEnabled(req.userId, site, !!enabled));
+});
+// 경험 자산 한 줄 추가 — 대화로 알려준 걸 바로 쌓는다
+app.post("/api/playbook/experience", (req, res) => {
+  const { site, line } = req.body || {};
+  if (!site || !line) return res.status(400).json({ error: "site·line 필요" });
+  res.json(DB.appendExperience(req.userId, site, line));
+});
+// 초안 기계 검증 — 관리 페이지에서 기존 초안을 일괄 점검할 때 쓴다
+app.post("/api/playbook/validate", (req, res) => {
+  const { site, title, content } = req.body || {};
+  const pb = site ? DB.getPlaybook(req.userId, site) : null;
+  const linkSec = pb?.sections?.find((x) => x.section === "links");
+  const allowed = linkSec ? (linkSec.body.match(/https?:\/\/\S+/g) || []) : [];
+  res.json(PB.validateNaverDraft({ title, content, allowedLinks: allowed }));
+});
 app.get("/api/by-draft", (req, res) => res.json(DB.workItemsByDraft(req.userId)));
 // 조회수 분석: 발행글 누적 + 여러 기간(24/48/72/168h) Δ + 발행일시 (정렬/필터는 클라이언트)
 app.get("/api/analytics", (req, res) => {
@@ -1190,13 +1231,23 @@ async function processAutoDraft(userId, draft) {
   if (!kKey) return false;
   const st = DB.getSettingsRaw(userId);
   const dests = DB.accountsForGeneration(userId).filter((a) => isDestRoleRow(a) && a.enabled !== false);   // 휴재(off) 계정 제외
+  // ★초안에 목적지가 지정돼 있으면 그것만 쓴다 (2026-08-12).
+  //   사고: 루틴이 site="naver" 로 목적지를 지정해 보냈는데도 이 함수가 dest_id 를 무시하고
+  //   니치 점수로 퍼뜨렸다. 그래서 네이버용 초안이 오구온라인에도 매칭돼, 같은 소재의
+  //   워드프레스 글이 KIE 로 또 만들어졌다('완벽 가이드… 총정리' 9,930자). 중복 콘텐츠에
+  //   KIE 비용까지 나갔다. 지정은 추측보다 항상 우선한다.
+  let list;
+  const pinned = draft.dest_id ? dests.find((a) => a.id === draft.dest_id) : null;
+  if (pinned) {
+    console.log(`[auto-draft] 목적지 지정됨 → ${pinned.id} 만 생성 (draft=${draft.id})`);
+    list = [pinned];
+  } else {
   const text = ((draft.keyword || "") + " " + (draft.title || "") + " " + (draft.content || "").slice(0, 1200)).toLowerCase();
   const scored = dests.map((a) => ({ a, s: topicScore(a, text) })).filter((x) => x.s > 0).sort((x, y) => y.s - x.s);
   if (!scored.length) return -1;   // 니치 매칭 없음(소비 안 함, 다음 초안으로)
   // 다중 매칭: ON이면 니치가 '충분히' 맞는 목적지 모두에 글 작성(약한 1점짜리 오탐 제외). OFF면 1곳만.
   const multi = st.autoMultiMatch !== false;
   const cap = parseInt(st.autoMultiMax, 10) || 0;   // 상한(0=무제한)
-  let list;
   if (multi) {
     // 최상위는 항상 포함, 추가 목적지는 '절대 점수 3 이상'이면 포함(니치 개수 차이에 안정적 + 경계 오탐 방지)
     const MIN_SECONDARY = 3;
@@ -1204,6 +1255,7 @@ async function processAutoDraft(userId, draft) {
     if (cap > 0) list = list.slice(0, cap);
   } else {
     list = [scored[0].a];
+  }
   }
   const today = new Date().toISOString().slice(0, 10);
   const keyword = draft.keyword || firstLine(draft.content);

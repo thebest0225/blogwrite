@@ -34,6 +34,7 @@
         </div>
         <div class="nav-group">
           <div class="nav-group-label">자동화 · 설정</div>
+          <button class="nav-item" data-view="playbook"><iconify-icon class="ni" icon="solar:notebook-bookmark-bold-duotone"></iconify-icon> 사이트 플레이북</button>
           <button class="nav-item" data-view="schedule"><iconify-icon class="ni" icon="solar:alarm-bold-duotone"></iconify-icon> 자동화·예약</button>
           <button class="nav-item" data-view="accounts"><iconify-icon class="ni" icon="solar:key-minimalistic-square-bold-duotone"></iconify-icon> 계정 관리</button>
           <button class="nav-item" data-view="settings"><iconify-icon class="ni" icon="solar:settings-bold-duotone"></iconify-icon> 설정</button>
@@ -51,7 +52,7 @@
       <section class="view" data-view="board">
         <div class="view-head"><h2>작업보드</h2><span class="muted">생성된 글을 검수·발행합니다. 발행하면 목록에서 사라집니다.</span></div>
         <div id="workDetail" class="card" style="display:none;">
-          <div class="row" style="justify-content:space-between;align-items:center;">
+          <div class="row wd-toolbar" style="justify-content:space-between;align-items:center;">
             <button class="mini" id="workBack"><iconify-icon icon="solar:arrow-left-linear"></iconify-icon> 목록으로</button>
             <div class="result-actions">
               <button class="mini" id="editToggle"><iconify-icon icon="solar:pen-2-linear"></iconify-icon> 편집</button>
@@ -60,6 +61,7 @@
               <button class="mini hidden" id="pullLiveBtn"><iconify-icon icon="solar:cloud-download-linear"></iconify-icon> 블로그 현재본 불러오기</button>
               <button class="mini primary-mini hidden" id="updatePublishBtn"><iconify-icon icon="solar:refresh-circle-linear"></iconify-icon> 수정 발행</button>
               <button class="mini" id="copyBtn"><iconify-icon icon="solar:copy-linear"></iconify-icon> HTML 복사</button>
+              <button class="mini danger-mini" id="deleteWorkBtn" title="이 작업을 삭제(발행 안 함)"><iconify-icon icon="solar:trash-bin-trash-linear"></iconify-icon> 삭제</button>
             </div>
           </div>
           <div class="mainurl-row" id="schedPubRow" style="background:var(--accent-soft);border-color:#dfe2fb;">
@@ -165,7 +167,7 @@
           <div class="row" style="gap:8px;flex-wrap:wrap;">
             <input type="text" id="draftSearch" placeholder="제목·키워드 검색" style="flex:1;min-width:180px;" />
             <select id="draftFilter" style="width:auto;">
-              <option value="new" selected>새 초안</option><option value="">전체</option><option value="used">사용됨</option>
+              <option value="active" selected>새 초안·실패</option><option value="new">새 초안</option><option value="failed">⚠ 실패</option><option value="">전체</option><option value="used">사용됨</option>
             </select>
           </div>
           <div id="draftsList" class="history-list" style="margin-top:10px;"></div>
@@ -174,6 +176,38 @@
       </section>
 
       <!-- 자동화·예약 -->
+      <!-- 사이트 플레이북 — 지침을 여기서 고치면 루틴이 다음 실행부터 그대로 따른다.
+           루틴 프롬프트에는 지침을 적지 않는다(next_topic 이 이걸 읽어간다). -->
+      <section class="view hidden" data-view="playbook">
+        <div class="view-head">
+          <h2>사이트 플레이북</h2>
+          <span class="muted">사이트별 페르소나·지침·경험자산. 여기서 고치면 <b>루틴이 다음 실행부터 그대로 따릅니다</b>.</span>
+          <button class="mini" id="pbRefresh" style="margin-left:auto;">새로고침</button>
+        </div>
+        <div class="pb-wrap">
+          <aside class="pb-sites">
+            <div class="pb-sites-head">사이트</div>
+            <div id="pbSiteList"></div>
+            <div class="pb-add">
+              <input id="pbNewSite" placeholder="새 사이트 키 (예: todaymoba)">
+              <button class="mini" id="pbAddSite">추가</button>
+            </div>
+          </aside>
+          <div class="pb-main">
+            <div id="pbHead" class="pb-head hidden">
+              <div class="pb-title"><b id="pbSiteName">—</b><span class="muted" id="pbMeta"></span></div>
+              <label class="pb-switch">
+                <input type="checkbox" id="pbEnabled">
+                <span>루틴 작동</span>
+              </label>
+              <button class="mini" id="pbExpAdd" title="대화로 알게 된 실제 경험을 한 줄 추가">＋ 경험 자산</button>
+              <button class="mini" id="pbAudit" title="이 사이트 초안을 기계 검증">초안 점검</button>
+            </div>
+            <div id="pbSections" class="pb-sections"><div class="muted">왼쪽에서 사이트를 고르세요.</div></div>
+          </div>
+        </div>
+      </section>
+
       <section class="view hidden" data-view="schedule">
         <div class="view-head"><h2>자동화 · 예약</h2><span class="muted">지정한 날짜·시간에 서버가 알아서 초안·목적지 생성/발행 (부재중용)</span></div>
 
@@ -293,7 +327,7 @@
       <section class="view hidden" data-view="assets">
         <div class="view-head"><h2>발행 자산</h2><span class="muted" id="myPostsCount">— 발행 글이 연관 링크로 자동 활용됩니다</span></div>
         <div class="card">
-          <div class="row"><input type="text" id="myPostSearch" placeholder="검색 (제목/키워드)" /></div>
+          <div class="row" style="gap:8px;"><input type="text" id="myPostSearch" placeholder="검색 (제목/키워드)" style="flex:1;" /><select id="myPostDateFilter" style="width:auto;flex:none;"><option value="">전체 기간</option><option value="0">오늘</option><option value="1">어제</option><option value="2">그제</option><option value="3d">최근 3일</option></select></div>
           <div class="row" style="margin-top:6px;"><input type="text" id="myPostTitle" placeholder="글 제목/키워드" /></div>
           <div class="row" style="margin-top:6px;"><input type="text" id="myPostUrl" placeholder="https://발행된-내글-주소" /><button class="mini" id="myPostAdd">추가</button></div>
           <div id="myPostsList" class="history-list" style="margin-top:10px;"></div>
@@ -383,6 +417,6 @@
     </div>
   </div>
 
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=20260725d"></script>
 </body>
 </html>
