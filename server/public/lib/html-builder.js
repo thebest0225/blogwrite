@@ -1,8 +1,20 @@
 // 생성된 JSON(article) → 플랫폼 독립 HTML(인라인 스타일) + JSON-LD 스키마
 // 모든 스타일은 인라인으로 넣어 워드프레스/블로거 어디에 붙여도 깨지지 않게 함.
 
-function esc(s = "") {
+// 모델이 간혹 리터럴 HTML 엔티티(&quot; &#39; 등)를 뱉으면 esc가 &를 또 이스케이프(&amp;quot;)해
+// 화면에 그대로 노출됨 → 먼저 디코드한 뒤 재이스케이프(idempotent). &amp;는 마지막에 처리.
+function deent(s = "") {
   return String(s)
+    .replace(/&quot;/gi, '"').replace(/&#0*34;/g, '"')
+    .replace(/&apos;/gi, "'").replace(/&#0*39;/g, "'").replace(/&lsquo;|&rsquo;/gi, "'")
+    .replace(/&ldquo;|&rdquo;/gi, '"')
+    .replace(/&nbsp;/gi, " ").replace(/&#0*160;/g, " ")
+    .replace(/&lt;/gi, "<").replace(/&#0*60;/g, "<")
+    .replace(/&gt;/gi, ">").replace(/&#0*62;/g, ">")
+    .replace(/&amp;/gi, "&").replace(/&#0*38;/g, "&");
+}
+function esc(s = "") {
+  return deent(s)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -173,7 +185,7 @@ function renderBlock(b, cfg) {
       // 모델이 클릭형으로 지정한 이미지만 링크로. URL은 검색결과로 안전하게 해석.
       const link = (b.linkUrl && b.linkUrl !== "#") ? resolveHref(b.linkUrl, b.alt || cfg.searchContext, cfg) : "";
       if (b.resolvedUrl) {
-        const img = `<img src="${esc(b.resolvedUrl)}" alt="${esc(b.alt || "")}" loading="lazy" style="${S.img}"/>`;
+        const img = `<img src="${esc(b.resolvedUrl)}" alt="${esc(b.alt || cfg.altFallback || "")}" loading="lazy" style="${S.img}"/>`;
         // 출처(Pexels 등) 캡션
         const credit = b.credit ? `<span style="display:block;text-align:center;color:#aaa;font-size:0.78em;margin-top:2px;">${b.creditUrl ? `<a href="${esc(b.creditUrl)}" target="_blank" rel="noopener nofollow" style="color:#aaa;text-decoration:none;">${esc(b.credit)}</a>` : esc(b.credit)}</span>` : "";
         // 클릭형 링크 이미지
@@ -187,9 +199,28 @@ function renderBlock(b, cfg) {
       const ph = `<div style="background:#f0f0f0;border:1px dashed #bbb;border-radius:10px;padding:24px;text-align:center;color:#999;margin:1em 0;">🖼️ 이미지 자리 (${esc(b.slot || "body")}${badge}) — ${esc(b.alt || b.prompt || "")}</div>`;
       return link ? `<a href="${esc(link)}" target="_blank" rel="noopener" style="text-decoration:none;">${ph}</a>` : ph;
     }
+    case "spacer":
+      return `<div style="height:${Math.max(8, Math.min(120, parseInt(b.size, 10) || 28))}px" aria-hidden="true">&nbsp;</div>`;
     default:
       return "";
   }
+}
+
+// 모델이 blocks(본문)에 'FAQ' 제목/섹션을 또 넣는 경우가 있어 renderFaq와 중복(+빈 자리)이 생김.
+// faq 배열에 유효 항목이 있으면 본문의 FAQ 섹션(제목~다음 H2 직전)을 제거해 하단 렌더 하나만 남긴다.
+function stripInlineFaq(blocks, faq) {
+  if (!Array.isArray(blocks) || !blocks.length) return blocks || [];
+  const hasFaq = (faq || []).some((f) => f && String(f.q || "").trim() && String(f.a || "").trim());
+  if (!hasFaq) return blocks;   // 배열이 비었으면 본문 FAQ가 유일한 소스일 수 있으니 보존
+  const isFaqHeading = (b) => b && b.type === "heading" && /(faq|자주\s*묻는\s*질문|많이\s*묻는\s*질문|q\s*&\s*a|궁금한\s*점)/i.test(String(b.text || ""));
+  const idx = blocks.findIndex(isFaqHeading);
+  if (idx === -1) return blocks;
+  const lvl = blocks[idx].level || 2;
+  let end = blocks.length;   // 다음 동급 이상 제목 전까지가 FAQ 섹션(그 뒤 마무리 등은 보존)
+  for (let j = idx + 1; j < blocks.length; j++) {
+    if (blocks[j].type === "heading" && (blocks[j].level || 2) <= lvl) { end = j; break; }
+  }
+  return blocks.slice(0, idx).concat(blocks.slice(end));
 }
 
 function renderFaq(faq = []) {
@@ -207,6 +238,7 @@ function buildSchema(article) {
     "@type": "Article",
     "headline": article.title,
     "description": article.metaDescription,
+    "datePublished": article.datePublished || article.today || undefined,
     "dateModified": article.today || undefined
   });
   if (article.faq?.length) {
@@ -233,6 +265,7 @@ export function buildHtml(article, opts = {}) {
     linkMode: opts.linkMode || "preserve",      // preserve=원본·공식 링크 그대로(기본) / search=불명확 링크 검색보완
     searchBase: opts.searchBase || "https://search.naver.com/search.naver?query=",
     searchContext: opts.searchContext || "",
+    altFallback: (article && (article.title || article.keyword)) || "",   // 이미지 alt 비었을 때 SEO 폴백(제목)
     relatedUrls: Array.isArray(opts.relatedUrls) ? opts.relatedUrls : [],
     selfUrl: opts.selfUrl || "",
     _i: 0
@@ -249,7 +282,7 @@ export function buildHtml(article, opts = {}) {
     parts.push(`<p style="${S.updated}">최종 업데이트: ${esc(article.today)}</p>`);
   }
 
-  const blocks = article.blocks || [];
+  const blocks = stripInlineFaq(article.blocks || [], article.faq);   // 본문 중복 FAQ 제거(하단 renderFaq만 사용)
   // 첫 H2 위치(도입부 뒤)와 중간 지점에 광고 삽입
   let firstH2 = -1;
   for (let i = 0; i < blocks.length; i++) {

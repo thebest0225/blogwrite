@@ -10,12 +10,13 @@
 //   새 MCP 도구를 만들지 않고 기존 도구(next_topic / submit_draft)를 확장하는 방식이다.
 
 const SEC_ORDER = [
-  "identity", "voice", "experience", "editorial", "keywords",
+  "identity", "voice", "experience", "editorial", "keywords", "tables",
   "structure", "contract", "topics", "covered", "links", "checklist", "cadence",
 ];
 const SEC_LABEL = {
   identity: "정체성·바이라인", voice: "말투", experience: "실제 경험 자산",
-  editorial: "편집 원칙", keywords: "검색 키워드 규칙", structure: "구조 규칙",
+  editorial: "편집 원칙", keywords: "검색 키워드 규칙", tables: "표 규칙",
+  structure: "구조 규칙",
   contract: "출력 형식 계약", topics: "주제 풀", covered: "이미 다룬 주제",
   links: "내부 링크 목록", checklist: "자기 점검", cadence: "발행 속도",
 };
@@ -127,7 +128,13 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
   }
 
   // ── 본문
-  if (p.charCount < 1700 || p.charCount > 2500) E.push(`본문이 ${p.charCount}자입니다 (1,700~2,500자)`);
+  // 표는 정보 밀도가 높아 글자수를 크게 밀어올린다. 상한은 '늘어짐'을 막으려는
+  // 것이므로 표 셀 글자는 절반만 센다.
+  const tableChars = (p.tables || []).reduce(
+    (n, tb) => n + tb.reduce((m, r) => m + r.join("").replace(/\s/g, "").length, 0), 0);
+  const proseChars = p.charCount - Math.floor(tableChars / 2);
+  if (proseChars < 1700 || proseChars > 2700)
+    E.push(`본문이 ${proseChars}자입니다 (1,700~2,700자, 표 글자는 절반만 셈 / 전체 ${p.charCount}자)`);
   const contentHeads = p.heads.filter((h) => h !== "함께 보면 좋은 글");
   if (contentHeads.length < 5 || contentHeads.length > 7) E.push(`소제목이 ${contentHeads.length}개입니다 (5~7개, 하단 '함께 보면 좋은 글' 제외)`);
   if (/\*\*/.test(p.text)) E.push("본문에 ** 가 남아 있습니다 (소제목은 그 줄 하나만으로 문단을 이뤄야 합니다)");
@@ -145,8 +152,12 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
   // ── 해시태그
   if (p.tags.length < 10 || p.tags.length > 20) E.push(`해시태그가 ${p.tags.length}개입니다 (10~20개)`);
   if (p.tags.some((x) => /\s/.test(x))) E.push("해시태그 안에 공백이 있습니다");
-  const lines = p.text.split("\n");
-  if (p.tagLine && lines[lines.length - 1] !== p.tagLine) W.push("해시태그가 마지막 본문 줄이 아닙니다");
+  // parseNaverDraft 가 태그 줄을 text 에서 떼어내므로 '마지막 줄이냐' 는 항상 거짓이 된다.
+  // 실제로 볼 것은 태그 줄 위에 공백 두 줄이 있는지다.
+  if (p.tagLine) {
+    const before = String(content).split(p.tagLine)[0].match(/\n*$/)?.[0] || "";
+    if ((before.match(/\n/g) || []).length < 3) W.push("해시태그 위에 공백 두 줄을 넣어주세요");
+  }
 
   // ── 메타·썸네일
   if (!p.meta.category) E.push("맨 위에 '카테고리:' 줄이 없습니다");
@@ -155,8 +166,12 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
 
   // ── 외국어 발음 표기 (읽을 수 없으면 독자가 못 씁니다)
   if (HAN_JP.test(p.text)) {
-    const jpLines = p.text.split("\n").filter((l) => HAN_JP.test(l));
-    const noRead = jpLines.filter((l) => !/[(/]\s*[가-힣]/.test(l));
+    // 발음은 같은 줄에 괄호로 붙이기도 하고 다음 줄에 "읽기:" 로 달기도 한다.
+    // 같은 줄만 보면 멀쩡한 글이 반려되므로 바로 다음 두 줄까지 함께 본다.
+    const L = p.text.split("\n");
+    const hasRead = (s) => /[(/'"]\s*[가-힣]/.test(s) || /읽기|발음/.test(s);
+    const noRead = L.filter((l, i) => HAN_JP.test(l) && !hasRead(l)
+      && !hasRead(L[i + 1] || "") && !hasRead(L[i + 2] || ""));
     if (noRead.length) E.push(`일본어에 발음 표기가 없는 줄 ${noRead.length}개 — 읽을 수 없으면 독자가 못 씁니다`);
   }
 
@@ -173,10 +188,21 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
   if (negatives >= 3 && remedies === 0) E.push(`'안 된다' 류가 ${negatives}번 나오는데 대안·되는 곳이 없습니다`);
 
   // ── 표
-  for (const rows of p.tables) {
+  // 2행짜리 3열 표는 문장으로 쓰는 게 낫다. 표를 넣었다면 비교할 값이 있어야 한다.
+  if (!p.tables.length) W.push("표가 없습니다 — 비교·금액·주기·판단 기준 중 하나는 표로 만드는 게 좋습니다");
+  if (p.tables.length > 2) W.push(`표가 ${p.tables.length}개입니다 — 한 글에 1~2개면 충분합니다`);
+  p.tables.forEach((rows, i) => {
+    const n = i + 1;
     const w = rows[0].length;
-    if (rows.some((r) => r.length !== w)) W.push("표의 열 수가 행마다 다릅니다");
-  }
+    if (rows.some((r) => r.length !== w)) E.push(`표${n} 의 열 수가 행마다 다릅니다 (자동 채우기가 깨집니다)`);
+    if (w < 3) E.push(`표${n} 이 ${w}열입니다 — 열을 하나 더 넣거나(비용·기한·연락방법 등) 불릿으로 바꾸세요`);
+    if (rows.length < 4) E.push(`표${n} 이 헤더 포함 ${rows.length}행입니다 — 비교 대상 3개 이상(4행)을 채우세요`);
+    // 숫자·금액·규격이 하나도 없으면 표가 아니라 그냥 나열이다
+    const digits = rows.slice(1).flat().join(" ");
+    if (!/\d/.test(digits)) W.push(`표${n} 에 수치가 없습니다 — 금액·크기·개수·기한 중 하나는 넣어주세요`);
+    // 셀이 비면 네이버에서 빈 칸으로 남아 성의없이 보인다
+    if (rows.slice(1).some((r) => r.some((c) => !c.trim()))) E.push(`표${n} 에 빈 칸이 있습니다`);
+  });
 
   return {
     ok: E.length === 0,

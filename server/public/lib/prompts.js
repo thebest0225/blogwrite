@@ -32,10 +32,10 @@ const GLOBAL_RULES = `
 
 // 공통 시스템 프롬프트: '사용자가 검증한 원본을 재편집·디자인' 으로 프레이밍 → 거부/서두 방지
 const EDITOR_SYSTEM =
-`너는 한국어 블로그 편집·디자인 전문가야. 사용자가 직접 작성하고 사실 확인까지 마친 '원본 글'을, 검색 노출이 잘 되는 보기 좋은 블로그 글로 재편집·재구성·디자인하는 작업이다.
-- 새로운 구체 사실(정확한 날짜·수치·실명 등)을 지어내지 말고, 원본에 있는 정보를 재구성·재배치하고 일반적으로 알려진 배경·맥락·연관 키워드로 자연스럽게 보강한다.
-- 이건 사용자 본인의 콘텐츠를 다듬는 정당한 편집 작업이다. 확인 질문이나 거부·주의 서두 없이 바로 결과만 낸다.
-- 반드시 요청된 JSON 형식 하나로만 응답한다(설명·코드펜스·서두 금지, '{' 로 시작).`;
+`너는 한국어 블로그 글쓰기를 돕는 편집자야. 블로그 운영자가 직접 쓰고 사실 확인을 마친 초안을 건네주면, 독자가 읽기 쉽고 잘 정리된 완성 글로 다듬어 주는 역할이다.
+- 원본에 있는 사실은 그대로 살려 재구성·정리하고, 일반적으로 알려진 배경·맥락과 관련 정보를 자연스럽게 보강한다.
+- 확인되지 않은 새로운 구체 사실(정확한 날짜·수치·실명 등)은 지어내지 않고, 모르는 부분은 두루뭉술하게 둔다.
+- 응답은 요청된 JSON 구조 하나로만 낸다(설명·코드펜스 없이 '{' 로 시작).`;
 
 // 작성 지침(중립적 서술 — 거부성 서두 유발 방지)
 const SOFT_NOTE =
@@ -111,6 +111,8 @@ const JSON_CONTRACT = `
 - 인물 주제면 이미지 prompt에 실명·국적·외모를 상세히 넣어 실사로 재현되게 하고, alt에는 SEO 키워드를 포함한다.
 - thumbnail 이미지 prompt에는 글자를 넣지 말 것(텍스트는 프로그램이 덧씌움). 대신 overlayText에 3~5단어 후크 문구를 제공한다.
 - thumbnail 인물은 여러 명 금지, 가장 중요한 주연 1명만 등장시킨다.
+- ★FAQ는 반드시 "faq" 필드에만 넣는다. blocks 배열 안에 '자주 묻는 질문'·'FAQ'·'Q&A' 같은 제목이나 섹션을 절대 만들지 마라(FAQ는 프로그램이 하단에 자동 렌더한다). blocks의 마지막은 FAQ가 아니라 본문 마무리/요약으로 끝낸다.
+- ★HTML 엔티티(&quot; &#39; &amp; 등)를 쓰지 마라. 따옴표·기호는 실제 문자(" ' & < >)로 그대로 쓴다.
 `;
 
 // 유형별 세부 지침
@@ -150,7 +152,7 @@ const TYPE_RULES = {
   news: `
 [유형: 이슈/트렌드형]
 구조: 핵심요약 3줄 → 무슨 일 → 배경 → 타임라인(table) → 반응/쟁점 → 전망 → FAQ.
-- 첫 callout(style:"info")에 핵심 요약 3줄 + "최종 업데이트: {오늘날짜}".
+- 첫 callout(style:"info")에 핵심 요약 3줄. (최종 업데이트 날짜는 시스템이 발행 시점에 자동으로 넣으니 본문에 날짜를 직접 적지 마라.)
 - 사실과 추측 구분("~로 알려짐" 등). 자극적 허위 금지.
 - 제목 패턴 예: "OO 총정리 — 무슨 일인지 한눈에".`
 };
@@ -204,7 +206,7 @@ export function buildPrompt({ type, keyword, audience, tone, length, authorBio, 
 - 톤: ${tone}
 - 분량: ${lengthGuide}
 - 이미지: 정확히 ${imgN}개 (썸네일 1 + 본문 ${imgN - 1})
-- 오늘 날짜: ${today}
+- 오늘 날짜: ${today} (참고용 시점 정보일 뿐 — 본문에 "최종 업데이트: 날짜" 같은 문구를 직접 적지 마라. 발행/수정 시 시스템이 자동으로 최신 날짜를 삽입한다.)
 ${authorBio ? `- 글 하단 저자 소개: ${authorBio}` : ""}
 
 [작성 가이드]
@@ -242,7 +244,7 @@ export function buildRewritePrompt({ type, keyword, existingTitle, existingText,
 - 대상 독자: ${audience}
 - 톤: ${tone}
 - 이미지: 정확히 ${imgN}개 (썸네일 1 + 본문 ${imgN - 1})
-- 오늘 날짜: ${today}
+- 오늘 날짜: ${today} (참고용 시점 정보일 뿐 — 본문에 "최종 업데이트: 날짜" 같은 문구를 직접 적지 마라. 발행/수정 시 시스템이 자동으로 최신 날짜를 삽입한다.)
 ${authorBio ? `- 글 하단 저자 소개: ${authorBio}` : ""}
 
 [작성 가이드]
@@ -273,9 +275,14 @@ function variantBlock(v) {
   if (v.total > 1) out += `\n[변형 지시 — 매우 중요] 같은 원본으로 여러 계정용 글을 만드는 중이다. 이 글은 그 중 ${v.index}번째다(총 ${v.total}개). 다른 변형들과 **제목·소제목·도입부·파생 키워드·다루는 각도를 확실히 다르게** 써서 중복을 피해라(같은 문장 재사용 금지).\n`;
   if (v.style) out += `\n[이 블로그의 톤·디자인 아이덴티티 — 이 스타일로 통일감 있게] "${v.style}" 이 느낌이 살도록 소제목 어조, 리스트/표/요약박스(callout) 사용 방식, 문단 길이를 맞춰라. (블로그마다 색깔이 달라야 한다)\n`;
   if (v.persona) out += `\n[페르소나 — 이 화자의 정체성·관점·말투로 일관되게 써라(1인칭)] ${v.persona}\n`;
+  // 사이트 고유 구성 지침 — destinations.overrides.structure 에서 온다.
+  // 아래 TYPE_RULES(키워드로 자동 감지되는 일반 유형)보다 이쪽이 우선이다.
+  if (v.structure) out += `\n[이 사이트의 글 구성 규칙 — 아래 일반 유형 규칙보다 이것을 우선한다]\n${v.structure}\n`;
   return out;
 }
-const CATEGORIES = ["몰라서 놓친 돈", "신청은 이렇게", "카드·금융 꿀팁", "살림 절약법", "경제 쉽게 읽기", "돈 굴리기"];
+// 카테고리는 wpCategoryNamesForAcc() 가 목적지 워드프레스에서 실시간으로 가져온다.
+// 조회 실패 시 옛 목록을 쓰면 다른 사이트에 없는 카테고리가 박히므로 폴백을 두지 않는다.
+const CATEGORIES = [];
 export function buildBloggerMain({ sourceText, keyword, audience, tone, authorBio, today, imageCount, reference, internalLinks, variant, categories }) {
   const cats = (categories && categories.length) ? categories : CATEGORIES;
   const resolved = resolveType("auto", keyword || "");
@@ -299,15 +306,14 @@ ${TYPE_RULES[resolved]}
 
 [말투·이모지] 정보성 글이라 신뢰감은 지키되 딱딱하지 않게. 이모지는 소제목이나 핵심 포인트에 아주 가끔만(글 전체 3~5개 이내) 써서 포인트를 준다 — 남발 금지.
 
-[카테고리] 이 글에 가장 알맞은 카테고리 하나를 아래 목록에서 골라 category 값에 넣어라(목록에 없는 값 금지):
-${cats.join(" / ")}
+[카테고리] ${cats.length ? `이 글에 가장 알맞은 카테고리 하나를 아래 목록에서 골라 category 값에 넣어라(목록에 없는 값 금지):\n${cats.join(" / ")}` : "목적지 카테고리 목록을 받지 못했다. category 는 비워 두고(빈 문자열) 사람이 지정하게 남겨라 — 임의로 만들지 마라."}
 
 [작성 조건]
 - 키워드(있으면 우선): "${keyword || "(원본에서 추론)"}"
 - 대상 독자: ${audience}
 - 톤: ${tone}
 - 이미지: 정확히 ${imgN}개 (썸네일 1 + 본문 ${imgN - 1})
-- 오늘 날짜: ${today}
+- 오늘 날짜: ${today} (참고용 시점 정보일 뿐 — 본문에 "최종 업데이트: 날짜" 같은 문구를 직접 적지 마라. 발행/수정 시 시스템이 자동으로 최신 날짜를 삽입한다.)
 ${authorBio ? `- 글 하단 저자 소개: ${authorBio}` : ""}
 
 ${variantBlock(variant)}
@@ -372,7 +378,7 @@ ${TYPE_RULES[resolved] || ""}
 - 대상 독자: ${audience}
 - 톤: ${tone}
 - 이미지: 정확히 ${imgN}개 (썸네일 1 + 본문 ${imgN - 1})
-- 오늘 날짜: ${today}
+- 오늘 날짜: ${today} (참고용 시점 정보일 뿐 — 본문에 "최종 업데이트: 날짜" 같은 문구를 직접 적지 마라. 발행/수정 시 시스템이 자동으로 최신 날짜를 삽입한다.)
 ${authorBio ? `- 글 하단 저자 소개: ${authorBio}` : ""}
 
 ${variantBlock(variant)}
@@ -407,7 +413,7 @@ ${originalUrl ? `- 내 원본 글 주소: ${originalUrl} (자세히 보기류 �
 - 대상 독자: ${audience}
 - 톤: ${tone}
 - 이미지: 정확히 ${imgN}개 (썸네일 1 + 본문 ${imgN - 1})
-- 오늘 날짜: ${today}
+- 오늘 날짜: ${today} (참고용 시점 정보일 뿐 — 본문에 "최종 업데이트: 날짜" 같은 문구를 직접 적지 마라. 발행/수정 시 시스템이 자동으로 최신 날짜를 삽입한다.)
 ${authorBio ? `- 글 하단 저자 소개: ${authorBio}` : ""}
 
 ${variantBlock(variant)}
