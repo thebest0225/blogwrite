@@ -445,12 +445,15 @@ export function upsertWorkItem(userId, w) {
   const ex = db.prepare("SELECT id FROM work_items WHERE user_id=? AND id=?").get(uid(userId), id);
   const aj = w.article ? JSON.stringify(w.article) : (w.article_json || null);
   const note = (w.note === undefined ? null : w.note);   // COALESCE: 미전달 시 기존 유지, ''전달 시 클리어
+  // published_url 도 같은 규칙이어야 한다. `w.published_url || null` 로 두면 ''를 보내도
+  // null 이 되어 COALESCE 가 옛 주소를 지켰다 — 잘못 매칭된 주소를 지울 방법이 없었다.
+  const pub = (w.published_url === undefined ? null : w.published_url);
   if (ex) {
     db.prepare("UPDATE work_items SET target=?,destination_id=?,title=?,article_json=COALESCE(?,article_json),html=COALESCE(?,html),status=?,note=COALESCE(?,note),published_url=COALESCE(?,published_url),published_id=COALESCE(?,published_id),publish_mode=COALESCE(?,publish_mode),updated_at=? WHERE user_id=? AND id=?")
-      .run(w.target, w.destination_id || null, w.title || "", aj, w.html ?? null, w.status || "generated", note, w.published_url || null, w.published_id || null, w.publish_mode || null, now(), uid(userId), id);
+      .run(w.target, w.destination_id || null, w.title || "", aj, w.html ?? null, w.status || "generated", note, pub, w.published_id || null, w.publish_mode || null, now(), uid(userId), id);
   } else {
     db.prepare("INSERT INTO work_items(id,user_id,draft_id,target,destination_id,title,article_json,html,status,note,published_url,published_id,publish_mode,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-      .run(id, uid(userId), w.draft_id || null, w.target, w.destination_id || null, w.title || "", aj, w.html || "", w.status || "generated", note, w.published_url || null, w.published_id || null, w.publish_mode || null, now(), now());
+      .run(id, uid(userId), w.draft_id || null, w.target, w.destination_id || null, w.title || "", aj, w.html || "", w.status || "generated", note, pub, w.published_id || null, w.publish_mode || null, now(), now());
   }
   return id;
 }
