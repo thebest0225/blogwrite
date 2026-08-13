@@ -10,13 +10,15 @@
 //   새 MCP 도구를 만들지 않고 기존 도구(next_topic / submit_draft)를 확장하는 방식이다.
 
 const SEC_ORDER = [
-  "identity", "voice", "experience", "editorial", "keywords", "tables",
-  "structure", "contract", "topics", "covered", "links", "checklist", "cadence",
+  "identity", "research", "voice", "experience", "editorial", "titles", "keywords",
+  "hook", "flow", "tables", "structure", "contract", "topics", "covered",
+  "links", "checklist", "cadence",
 ];
 const SEC_LABEL = {
   identity: "정체성·바이라인", voice: "말투", experience: "실제 경험 자산",
   editorial: "편집 원칙", keywords: "검색 키워드 규칙", tables: "표 규칙",
-  structure: "구조 규칙",
+  research: "쓰기 전 조사", titles: "제목 만드는 법", hook: "도입부 설계",
+  flow: "본문 전개와 체류 장치", structure: "구조 규칙",
   contract: "출력 형식 계약", topics: "주제 풀", covered: "이미 다룬 주제",
   links: "내부 링크 목록", checklist: "자기 점검", cadence: "발행 속도",
 };
@@ -97,6 +99,9 @@ export function parseNaverDraft(content) {
   const meta = {};
   src = src.replace(/^\s*카테고리\s*[:：]\s*(.+)$/m, (_, v) => { meta.category = v.trim(); return ""; });
   src = src.replace(/^\s*원본참고\s*[:：]\s*(.+)$/m, (_, v) => { meta.source = v.trim(); return ""; });
+  // 글 유형 — 경험형은 짧고 소제목 3개, 정보형은 길고 5~7개.
+  // 하나의 규격으로 다 쓰면 훈련 글은 늘어지고 검역 글은 부실해진다.
+  src = src.replace(/^\s*유형\s*[:：]\s*(.+)$/m, (_, v) => { meta.kind = v.trim(); return ""; });
 
   let tagLine = "";
   src = src.replace(/^\s*(#[^\s#]+(?:\s+#[^\s#]+){2,})\s*$/m, (_, v) => { tagLine = v.trim(); return ""; });
@@ -173,10 +178,23 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
   const tableChars = (p.tables || []).reduce(
     (n, tb) => n + tb.reduce((m, r) => m + r.join("").replace(/\s/g, "").length, 0), 0);
   const proseChars = p.charCount - Math.floor(tableChars / 2);
-  if (proseChars < 1700 || proseChars > 2700)
-    E.push(`본문이 ${proseChars}자입니다 (1,700~2,700자, 표 글자는 절반만 셈 / 전체 ${p.charCount}자)`);
+  const isExp = /경험/.test(p.meta.kind || "");          // 유형 미표기는 정보형으로 본다
+  const kindName = isExp ? "경험형" : "정보형";
+  const [lo, hi] = isExp ? [1100, 1600] : [1800, 2600];
+  if (proseChars < lo || proseChars > hi)
+    E.push(`본문이 ${proseChars}자입니다 — ${kindName}은 ${lo.toLocaleString()}~${hi.toLocaleString()}자 (표 글자는 절반만 셈 / 전체 ${p.charCount}자)`);
+  if (!p.meta.kind) W.push("맨 위에 '유형: 경험형' 또는 '유형: 정보형' 줄이 없습니다 — 정보형으로 검사했습니다");
+
   const contentHeads = p.heads.filter((h) => h !== "함께 보면 좋은 글");
-  if (contentHeads.length < 5 || contentHeads.length > 7) E.push(`소제목이 ${contentHeads.length}개입니다 (5~7개, 하단 '함께 보면 좋은 글' 제외)`);
+  const [hLo, hHi] = isExp ? [3, 3] : [5, 7];
+  if (contentHeads.length < hLo || contentHeads.length > hHi)
+    E.push(`소제목이 ${contentHeads.length}개입니다 — ${kindName}은 ${hLo === hHi ? hLo + "개" : hLo + "~" + hHi + "개"} (하단 '함께 보면 좋은 글' 제외)`);
+
+  // ── 소제목이 문장형인지
+  // 명사로 끝나는 소제목은 목차처럼 읽혀서 다음 문단을 읽을 이유를 못 준다.
+  const nounHeads = contentHeads.filter((h) => !/(요|다|까|나|죠|군요|습니다|세요|네요)[.?!]?$/.test(h.trim()));
+  if (nounHeads.length > Math.floor(contentHeads.length / 2))
+    W.push(`소제목 ${nounHeads.length}/${contentHeads.length}개가 명사로 끝납니다 — 읽고 싶게 만드는 문장형으로 (${nounHeads.slice(0, 2).join(" / ")})`);
   if (/\*\*/.test(p.text)) E.push("본문에 ** 가 남아 있습니다 (소제목은 그 줄 하나만으로 문단을 이뤄야 합니다)");
 
   // ── 사진
@@ -239,6 +257,25 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
   if (p.bodyLinks.length > 2)
     W.push(`본문 중간 링크가 ${p.bodyLinks.length}개입니다 (1~2개 권장)`);
 
+  // ── 지어낸 독자 반응 (확인할 수 없는 사회적 증거)
+  // 후쿠오카 글에 없던 댓글을 지어낸 사고가 있었다. 이건 독자를 속이는 것이고
+  // 실제 반응이 없는 블로그에서는 금방 들통난다.
+  const FAKE_SOCIAL = /댓글이 (많|여러|꽤)|질문이 (많|여러|꽤|자주)|문의가 (많|여러|꽤)|물어보시는 분들이 (많|여러)|요청이 (많|있어서)|다들 궁금해하|반응이 (좋|많)|쪽지가 (많|여러)/;
+  const fake = p.text.match(FAKE_SOCIAL);
+  if (fake) E.push(`독자 반응을 지어낸 표현이 있습니다 ('${fake[0]}') — 확인할 수 없는 주장은 쓰지 마세요`);
+
+  // ── 도입부·마무리가 고정 문구로 굳었는지
+  // 35건이 전부 '안녕하세요! 망고아빠입니다.' 로 시작하고 대다수가 '댓글 남겨주세요' 로
+  // 끝난 적이 있다. 규칙이 만든 획일성이라 규칙으로 막는다.
+  const lines0 = p.text.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (/^안녕하세요[!.]?\s*망고아빠입니다[.!]?$/.test(lines0[0] || ""))
+    W.push("첫 줄이 고정 인사말입니다 — 실제 상황으로 시작하고 인사는 뒤로 미루거나 문장을 바꿔주세요");
+  const tailText = lines0.slice(-6).join(" ");
+  if (/댓글 (남겨|달아)주세요/.test(tailText))
+    W.push("'댓글 남겨주세요' 로 끝납니다 — 독자가 자기 경험을 말하고 싶어지는 질문으로 끝내주세요");
+  if (!/\?$|\?\s*$/m.test(lines0.slice(-4).join("\n")))
+    W.push("마무리에 독자에게 묻는 질문이 없습니다");
+
   // ── 실용 밀도: '안 된다' 를 쓰고 대안이 없으면
   const negatives = (p.text.match(/안 되|안 됩니다|어렵습니다|제한이 있|불가/g) || []).length;
   const remedies = (p.text.match(/대신|되는 곳|되는 조건|찾는 방법|이렇게 물어|가능한 곳|대안/g) || []).length;
@@ -265,6 +302,7 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
     ok: E.length === 0,
     errors: E, warns: W,
     stats: {
+      kind: kindName, proseChars,
       titleChars: t.length, bodyChars: p.charCount,
       heads: contentHeads.length, photos: p.photos.length,
       tables: p.tables.length, links: p.links.length, tags: p.tags.length,
