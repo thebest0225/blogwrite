@@ -133,8 +133,13 @@ function buildServer(userId) {
       const pbForCheck = pbSite ? DB.getPlaybook(userId, pbSite) : null;
       const isNaver = destId === "naver_mango" || String(site || "").toLowerCase().includes("naver");
       if (isNaver && pbForCheck && pbForCheck.sections.length) {
+        // 허용 목록은 next_topic 이 보낸 것과 같아야 한다 —
+        // 정적 목록 + 발행 완료된 글. 안 맞으면 방금 알려준 주소를 썼는데 반려된다.
         const linkSec = pbForCheck.sections.find((x) => x.section === "links");
-        const allowed = linkSec ? (linkSec.body.match(/https?:\/\/\S+/g) || []) : [];
+        let allowed = PB.allowedLinksFrom(linkSec ? linkSec.body : "");
+        try {
+          allowed = allowed.concat(DB.naverPublishedLinks(userId).map((r) => r.url).filter(Boolean));
+        } catch {}
         const v = PB.validateNaverDraft({ title, content, allowedLinks: allowed });
         if (!v.ok) {
           const lines = [
@@ -204,9 +209,24 @@ function buildServer(userId) {
               .slice(0, 60)
               .map((d) => d.title);
           } catch {}
+          // 발행 완료된 글을 내부 링크 후보에 합친다. 정적 목록만 쓰면 새 글이
+          // '함께 보면 좋은 글' 에 영원히 안 들어간다(예약발행은 주소가 나중에 붙는다).
+          let linkExtra = "";
+          let pubCount = 0, missCount = 0;
+          if (site === "naver") {
+            try {
+              const linkSec = pb.sections.find((x) => x.section === "links");
+              const pub = DB.naverPublishedLinks(userId);
+              const miss = DB.naverPublishedMissingUrl(userId);
+              pubCount = pub.length; missCount = miss.length;
+              linkExtra = PB.linksWithPublished(linkSec ? linkSec.body : "", pub, miss.length);
+            } catch (e) { console.error("[mcp] 발행글 링크 합치기 실패", e.message); }
+          }
           pbBlock = {
             site, playbook_enabled: true, meta: pb.meta,
-            playbook: PB.renderPlaybook(pb),
+            playbook: PB.renderPlaybook(pb, linkExtra ? { links: linkExtra } : {}),
+            published_links: pubCount,
+            published_without_url: missCount,
             already_written: recent,
             already_written_note: "이 사이트에 이미 쓴 제목이다. 여기 있는 주제는 다시 쓰지 마라(플레이북의 [이미 다룬 주제] 보다 이게 최신이다).",
             draft_count: recent.length,

@@ -21,13 +21,43 @@ const SEC_LABEL = {
   links: "내부 링크 목록", checklist: "자기 점검", cadence: "발행 속도",
 };
 
+// 로그·오류 메시지에 주소 전체를 박으면 읽기 어렵다. 네이버 글번호만 보여준다.
+function shortLink(u) { return String(u).split("/").filter(Boolean).pop(); }
+
 export function sectionOrder() { return SEC_ORDER.slice(); }
 export function sectionLabel(k) { return SEC_LABEL[k] || k; }
 
+// 정적 링크 목록에 '발행 완료된 글' 을 합친다.
+//
+// 왜 필요한가 — 정적 목록만 쓰면 새로 발행한 글이 '함께 보면 좋은 글' 후보에 영원히
+// 안 들어간다. 예약발행이 많아 주소가 나중에 붙는데(확장이 3시간마다 블로그를 훑어
+// 제목으로 매칭한다), 그 결과가 반영되지 않으면 항상 옛 글만 서로 링크하게 된다.
+export function linksWithPublished(linkBody, published = [], missingUrl = 0) {
+  const base = String(linkBody || "").trim();
+  const have = new Set(base.match(/https?:\/\/\S+/g) || []);
+  const fresh = (published || []).filter((r) => r.url && !have.has(r.url));
+  const out = [base];
+  if (fresh.length) {
+    out.push("", "[최근 발행글 — 여기서도 골라도 된다]",
+      ...fresh.map((r) => `${r.url} ${String(r.title || "").replace(/\s*\(20\d\d[^)]*\)\s*$/, "").trim()}`));
+  }
+  if (missingUrl > 0) {
+    out.push("", `※ 발행했지만 주소가 아직 안 붙은 글 ${missingUrl}건이 있다. 주소를 모르니 링크로 쓰지 마라.`);
+  }
+  return out.join("\n");
+}
+
+// 플레이북에서 링크로 써도 되는 주소만 뽑는다. submit_draft 검증이 이걸 쓴다.
+export function allowedLinksFrom(linkBody) {
+  return String(linkBody || "").match(/https?:\/\/\S+/g) || [];
+}
+
 // 플레이북을 루틴이 그대로 따를 수 있는 한 덩어리 글로 만든다.
-export function renderPlaybook(pb) {
+// extra: { links: "…" } 를 주면 그 섹션 본문을 대신 쓴다(발행글 합친 목록).
+export function renderPlaybook(pb, extra = {}) {
   if (!pb || !pb.sections?.length) return "";
   const bySec = new Map(pb.sections.map((s) => [s.section, s.body]));
+  for (const [k, v] of Object.entries(extra)) if (v) bySec.set(k, v);
   const out = [];
   for (const k of SEC_ORDER) {
     const body = bySec.get(k);
@@ -73,6 +103,11 @@ export function parseNaverDraft(content) {
 
   const groups = src.split(/\n{2,}/).map((g) => g.trim()).filter(Boolean);
   const heads = [], photos = [], tables = [], links = [], text = [];
+  // 본문 링크와 하단 '함께 보면 좋은 글' 링크를 나눠 담는다.
+  // 같은 주소가 두 곳에 다 들어가면 네이버가 링크 카드를 두 번 그려서
+  // 같은 글이 반복돼 보인다(실제로 겪었다). 그걸 잡으려면 구분이 필요하다.
+  const bodyLinks = [], footerLinks = [];
+  let inFooter = false;
   for (const g of groups) {
     const lines = g.split("\n").map((l) => l.trim()).filter(Boolean);
     if (!lines.length) continue;
@@ -91,14 +126,19 @@ export function parseNaverDraft(content) {
     }
     if (lines.length === 1 && /^\*\*.+\*\*$/.test(lines[0])) {
       const h = lines[0].replace(/^\*\*|\*\*$/g, "").trim();
+      if (h === "함께 보면 좋은 글") inFooter = true;
       heads.push(h); text.push(h); continue;
     }
-    if (lines.every((l) => /^https?:\/\/\S+$/.test(l))) { links.push(...lines); text.push(...lines); continue; }
+    if (lines.every((l) => /^https?:\/\/\S+$/.test(l))) {
+      links.push(...lines);
+      (inFooter ? footerLinks : bodyLinks).push(...lines);
+      text.push(...lines); continue;
+    }
     text.push(lines.join("\n"));
   }
   const body = text.join("\n\n");
   return {
-    meta, heads, photos, tables, links, thumb, tagLine,
+    meta, heads, photos, tables, links, bodyLinks, footerLinks, thumb, tagLine,
     text: body,
     charCount: body.replace(/\s/g, "").length,
     tags: tagLine ? tagLine.split(/\s+/).filter(Boolean) : [],
@@ -181,6 +221,23 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
     if (bad.length) E.push(`허용 목록에 없는 주소 ${bad.length}개: ${bad.slice(0, 2).join(", ")}`);
   }
   if (!p.links.length) W.push("내부 링크가 없습니다");
+
+  // ── 링크 중복
+  // 네이버는 주소 한 줄을 링크 카드(썸네일+제목)로 바꿔 그린다. 같은 주소가 본문과
+  // 하단에 다 있으면 같은 글이 카드로 두 번 뜨고, 독자에겐 글이 반복돼 보인다.
+  const dupBoth = p.bodyLinks.filter((u) => p.footerLinks.includes(u));
+  if (dupBoth.length) {
+    E.push(`본문과 '함께 보면 좋은 글' 에 같은 주소가 ${dupBoth.length}개 있습니다 — ` +
+           `네이버가 링크 카드를 두 번 그려서 같은 글이 반복돼 보입니다 (${dupBoth.map(shortLink).join(", ")})`);
+  }
+  const seen = new Set(), dupSame = new Set();
+  for (const u of p.links) { if (seen.has(u)) dupSame.add(u); seen.add(u); }
+  const footerDup = p.footerLinks.filter((u, i) => p.footerLinks.indexOf(u) !== i);
+  if (footerDup.length) E.push(`'함께 보면 좋은 글' 안에 같은 주소가 중복입니다 (${footerDup.map(shortLink).join(", ")})`);
+  if (p.footerLinks.length && p.footerLinks.length !== 3)
+    W.push(`'함께 보면 좋은 글' 이 ${p.footerLinks.length}개입니다 (3개 권장)`);
+  if (p.bodyLinks.length > 2)
+    W.push(`본문 중간 링크가 ${p.bodyLinks.length}개입니다 (1~2개 권장)`);
 
   // ── 실용 밀도: '안 된다' 를 쓰고 대안이 없으면
   const negatives = (p.text.match(/안 되|안 됩니다|어렵습니다|제한이 있|불가/g) || []).length;

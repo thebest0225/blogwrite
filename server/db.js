@@ -489,3 +489,34 @@ export function pruneDoneSchedules(cutoffIso) { db.prepare("DELETE FROM schedule
 export function recoverRunningSchedules() { const r = db.prepare("UPDATE schedules SET status='pending' WHERE status='running'").run(); return r.changes; }
 
 export default db;
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  네이버 내부 링크 후보
+//
+//  왜 필요한가 (2026-08-13)
+//    플레이북의 [내부 링크 목록] 은 손으로 적어둔 정적 목록이었다. 그래서 새로 발행한
+//    글이 '함께 보면 좋은 글' 후보에 절대 안 들어갔다. 예약발행이 많아 발행 주소가
+//    나중에 붙는데(확장이 3시간마다 블로그를 훑어 제목으로 매칭한다), 그 결과가
+//    링크 목록에 반영되지 않으면 항상 옛 글만 서로 링크하게 된다.
+//    그래서 발행 완료된 work_items 의 주소를 후보에 합친다.
+// ─────────────────────────────────────────────────────────────────────────────
+export function naverPublishedLinks(userId) {
+  return db.prepare(
+    `SELECT title, published_url AS url, updated_at
+       FROM work_items
+      WHERE user_id=? AND target='naver'
+        AND published_url IS NOT NULL AND published_url<>''
+      ORDER BY updated_at DESC`
+  ).all(uid(userId));
+}
+
+// 발행은 됐는데 주소가 아직 안 붙은 것 — 예약발행이면 확장이 나중에 매칭한다.
+// 링크 후보로 쓸 수 없으니 몇 건인지 알려주기 위해 센다.
+export function naverPublishedMissingUrl(userId) {
+  return db.prepare(
+    `SELECT id, title FROM work_items
+      WHERE user_id=? AND target='naver' AND status='published'
+        AND (published_url IS NULL OR published_url='')
+      ORDER BY updated_at DESC`
+  ).all(uid(userId));
+}
