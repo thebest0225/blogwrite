@@ -129,9 +129,11 @@ export function parseNaverDraft(content) {
         .map((l) => l.replace(/^\||\|$/g, "").split("|").map((c) => c.trim()));
       if (rows.length) { tables.push(rows); text.push(rows.map((r) => r.join(" | ")).join("\n")); continue; }
     }
+    // 푸터 표식이 두 형식으로 존재한다 — '**함께 보면 좋은 글**' 과 평문 '함께 보면 좋은 글 ▼'.
+    // 하나만 보면 하단 링크를 본문 링크로 세어 중복 판정이 어긋난다.
+    if (/^함께 (보면|읽으면) 좋은 글/.test(lines[0].replace(/\*/g, "").trim())) inFooter = true;
     if (lines.length === 1 && /^\*\*.+\*\*$/.test(lines[0])) {
       const h = lines[0].replace(/^\*\*|\*\*$/g, "").trim();
-      if (h === "함께 보면 좋은 글") inFooter = true;
       heads.push(h); text.push(h); continue;
     }
     if (lines.every((l) => /^https?:\/\/\S+$/.test(l))) {
@@ -180,13 +182,20 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
   const proseChars = p.charCount - Math.floor(tableChars / 2);
   const isExp = /경험/.test(p.meta.kind || "");          // 유형 미표기는 정보형으로 본다
   const kindName = isExp ? "경험형" : "정보형";
-  const [lo, hi] = isExp ? [1100, 1600] : [1800, 2600];
+  // 밴드는 실측 분포에 맞춘다. 처음에 경험형을 1,100~1,600 으로 잡았더니
+  // 기존 20건(중간 1,733자)의 내용을 잘라내야 했다. 짧게 만드는 게 목적이 아니라
+  // 늘어지지 않게 하는 게 목적이므로, 길이보다 소제목 수와 전개로 잡는다.
+  const [lo, hi] = isExp ? [1300, 2000] : [1700, 2600];
   if (proseChars < lo || proseChars > hi)
     E.push(`본문이 ${proseChars}자입니다 — ${kindName}은 ${lo.toLocaleString()}~${hi.toLocaleString()}자 (표 글자는 절반만 셈 / 전체 ${p.charCount}자)`);
   if (!p.meta.kind) W.push("맨 위에 '유형: 경험형' 또는 '유형: 정보형' 줄이 없습니다 — 정보형으로 검사했습니다");
 
-  const contentHeads = p.heads.filter((h) => h !== "함께 보면 좋은 글");
-  const [hLo, hHi] = isExp ? [3, 3] : [5, 7];
+  // '정리하면 이래요' 는 마무리 표식이라 내용 소제목이 아니다. 하단 링크 제목도 마찬가지.
+  const contentHeads = p.heads.filter(
+    (h) => h !== "함께 보면 좋은 글" && !/^(정리하면|정리 —|마무리|한 줄 정리)/.test(h.trim()));
+  // 경험형은 소제목을 적게 두고 한 덩어리를 길게 쓴다 — 3~4개.
+  // 6~7개로 쪼개면 목차처럼 읽혀서 흐름이 끊긴다.
+  const [hLo, hHi] = isExp ? [3, 4] : [5, 7];
   if (contentHeads.length < hLo || contentHeads.length > hHi)
     E.push(`소제목이 ${contentHeads.length}개입니다 — ${kindName}은 ${hLo === hHi ? hLo + "개" : hLo + "~" + hHi + "개"} (하단 '함께 보면 좋은 글' 제외)`);
 
@@ -270,10 +279,14 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
   const lines0 = p.text.split("\n").map((l) => l.trim()).filter(Boolean);
   if (/^안녕하세요[!.]?\s*망고아빠입니다[.!]?$/.test(lines0[0] || ""))
     W.push("첫 줄이 고정 인사말입니다 — 실제 상황으로 시작하고 인사는 뒤로 미루거나 문장을 바꿔주세요");
-  const tailText = lines0.slice(-6).join(" ");
-  if (/댓글 (남겨|달아)주세요/.test(tailText))
+  // ⚠️ p.text 의 끝은 하단 '함께 보면 좋은 글' 링크다. 마무리 구간을 따로 잡아야 한다.
+  const fi = p.text.indexOf("함께 보면 좋은 글");
+  const closing = (fi > 0 ? p.text.slice(0, fi) : p.text).split("\n")
+    .map((l) => l.trim()).filter(Boolean).slice(-12).join("\n");
+  if (/댓글 (남겨|달아)주세요/.test(closing))
     W.push("'댓글 남겨주세요' 로 끝납니다 — 독자가 자기 경험을 말하고 싶어지는 질문으로 끝내주세요");
-  if (!/\?$|\?\s*$/m.test(lines0.slice(-4).join("\n")))
+  // 물음표가 없어도 '궁금합니다' 처럼 묻는 형태면 인정한다
+  if (!/\?/.test(closing) && !/궁금(합니다|해요|하네요)|어떠(세요|신가요)|있으(세요|신가요)/.test(closing))
     W.push("마무리에 독자에게 묻는 질문이 없습니다");
 
   // ── 실용 밀도: '안 된다' 를 쓰고 대안이 없으면
