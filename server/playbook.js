@@ -358,3 +358,75 @@ export function validateWpArticle({ title = "", body = "", calcLinks = [] } = {}
 
   return { ok: E.length === 0, errors: E, warns: W, stats: { titleChars: t.length, bodyChars: chars, h2 } };
 }
+
+// ─────────────────────────────────────────────────────────────
+//  니치 관찰 분석 — 상위 노출 제목에서 패턴을 뽑는다
+//
+//  왜 필요한가 (2026-08-14)
+//    "룰 하나 정해놓고 뺑뺑이" 라는 지적을 받았다. 실제로 초안 35건이 같은 첫 문장으로
+//    시작했다. 무엇이 상위에 뜨는지 보지 않고 내부 규칙만 돌렸기 때문이다.
+//    확장이 모아온 제목을 여기서 숫자로 바꿔 [쓰기 전 조사] 에 실어 보낸다.
+//    사람이 눈으로 20개를 세는 대신 기계가 세게 한다.
+// ─────────────────────────────────────────────────────────────
+const SERP_DEVICES = [
+  ["말줄임표로 끊기", /(…|\.\.\.)\s*$|(…|\.\.\.)/],
+  ["직접 인용", /["“”''][^"“”'']{4,}["“”'']/],
+  ["질문형", /\?/],
+  ["구체적 숫자", /\d/],
+  ["비교·대결", /vs|VS|비교|보다|차이/],
+  ["반전·의외", /사실|알고 ?보니|의외|반전|였는데|인 줄|아니었/],
+  ["금지·주의", /하지 마|안 되|주의|실수|함정|망하|피하/],
+  ["방법·순서", /방법|순서|하는 법|고르는|기준/],
+  ["시점 표기", /20\d\d|올해|이번 ?달|최신/],
+  ["말 걸기", /요\?|잖아요|하실까요|해보세요|아세요/],
+];
+
+export function analyzeSerp(rows) {
+  const titles = (rows || []).map((r) => r.title).filter(Boolean);
+  if (!titles.length) return null;
+
+  const devices = SERP_DEVICES.map(([name, re]) => ({
+    name, n: titles.filter((t) => re.test(t)).length,
+  })).sort((a, b) => b.n - a.n);
+
+  const lens = titles.map((t) => t.length).sort((a, b) => a - b);
+  const mid = lens[Math.floor(lens.length / 2)];
+
+  // 자주 나오는 낱말 — 제목에서 실제로 쓰이는 검색어를 본다
+  const stop = new Set(["그리고", "하는", "있는", "위한", "대한", "해서", "하고", "이거",
+                        "저거", "정말", "너무", "진짜", "제가", "저는", "이런", "그런"]);
+  const freq = new Map();
+  for (const t of titles) {
+    for (const w of t.split(/[^가-힣A-Za-z0-9]+/)) {
+      if (w.length < 2 || stop.has(w)) continue;
+      freq.set(w, (freq.get(w) || 0) + 1);
+    }
+  }
+  const words = [...freq.entries()].filter(([, n]) => n >= 2)
+    .sort((a, b) => b[1] - a[1]).slice(0, 18);
+
+  return { count: titles.length, medianLen: mid,
+           minLen: lens[0], maxLen: lens[lens.length - 1], devices, words };
+}
+
+// 분석 결과를 [쓰기 전 조사] 뒤에 붙일 글로 만든다.
+export function renderSerp(byKeyword) {
+  const blocks = [];
+  for (const { keyword, rows, seen } of byKeyword) {
+    const a = analyzeSerp(rows);
+    if (!a) continue;
+    const dev = a.devices.filter((d) => d.n > 0)
+      .map((d) => `${d.name} ${d.n}/${a.count}`).join(" · ");
+    blocks.push(
+      `· "${keyword}" 상위 ${a.count}개 (수집 ${String(seen).slice(0, 10)})\n` +
+      `  제목 길이 ${a.minLen}~${a.maxLen}자, 중간 ${a.medianLen}자\n` +
+      `  장치: ${dev}\n` +
+      `  자주 쓰인 말: ${a.words.map(([w, n]) => `${w}(${n})`).join(", ")}\n` +
+      `  실제 제목 —\n` +
+      rows.slice(0, 5).map((r) => `    ${r.rank}. ${r.title}`).join("\n"));
+  }
+  if (!blocks.length) return "";
+  return "[실제 상위 노출 제목 관찰 — 확장이 모아온 것]\n" +
+    "추측하지 말고 이 숫자를 근거로 써라. 내 제목이 여기서 어떻게 다른지 의식하고 만든다.\n\n" +
+    blocks.join("\n\n");
+}

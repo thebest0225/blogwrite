@@ -523,3 +523,67 @@ export function naverPublishedMissingUrl(userId) {
       ORDER BY updated_at DESC`
   ).all(uid(userId));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  니치 관찰 — 네이버 검색 상위 글 제목
+//
+//  왜 필요한가 (2026-08-14)
+//    지금까지 주제와 제목을 내부 규칙만 보고 정했다. 그래서 35건이 같은 틀로 나왔고
+//    니치가 좁아졌다. 무엇이 실제로 상위에 뜨는지 봐야 하는데, 네이버 robots.txt 가
+//    ClaudeBot 의 search.naver.com 접근을 금지하므로 서버에서 못 긁는다.
+//    그래서 망고오토 확장이 사용자 브라우저에서 모아 여기로 보낸다.
+// ─────────────────────────────────────────────────────────────────────────────
+db.exec(`CREATE TABLE IF NOT EXISTS serp_titles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  site TEXT NOT NULL,
+  keyword TEXT NOT NULL,
+  rank INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  url TEXT,
+  blog TEXT,
+  posted TEXT,
+  seen_at TEXT NOT NULL
+)`);
+try { db.exec("CREATE INDEX IF NOT EXISTS ix_serp_kw ON serp_titles(user_id, site, keyword, seen_at)"); } catch {}
+
+export function saveSerpTitles(userId, site, results) {
+  const ins = db.prepare(
+    `INSERT INTO serp_titles(user_id,site,keyword,rank,title,url,blog,posted,seen_at)
+     VALUES(?,?,?,?,?,?,?,?,?)`);
+  const ts = now();
+  let n = 0;
+  const tx = db.transaction(() => {
+    for (const r of results || []) {
+      // 같은 키워드를 다시 훑으면 옛 관측을 지운다 — 순위가 바뀌므로 누적할 값이 아니다
+      db.prepare("DELETE FROM serp_titles WHERE user_id=? AND site=? AND keyword=?")
+        .run(uid(userId), site, r.keyword);
+      (r.items || []).forEach((it, i) => {
+        if (!it || !it.title) return;
+        ins.run(uid(userId), site, r.keyword, i + 1, it.title,
+                it.url || null, it.blog || null, it.date || null, ts);
+        n++;
+      });
+    }
+  });
+  tx();
+  return n;
+}
+
+export function serpTitles(userId, site, keyword = null, limit = 400) {
+  if (keyword) {
+    return db.prepare(
+      `SELECT * FROM serp_titles WHERE user_id=? AND site=? AND keyword=?
+        ORDER BY rank LIMIT ?`).all(uid(userId), site, keyword, limit);
+  }
+  return db.prepare(
+    `SELECT * FROM serp_titles WHERE user_id=? AND site=? ORDER BY keyword, rank LIMIT ?`)
+    .all(uid(userId), site, limit);
+}
+
+export function serpKeywords(userId, site) {
+  return db.prepare(
+    `SELECT keyword, COUNT(*) n, MAX(seen_at) seen FROM serp_titles
+      WHERE user_id=? AND site=? GROUP BY keyword ORDER BY seen DESC`)
+    .all(uid(userId), site);
+}

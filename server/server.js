@@ -890,6 +890,26 @@ app.post("/api/playbook/experience", (req, res) => {
   if (!site || !line) return res.status(400).json({ error: "site·line 필요" });
   res.json(DB.appendExperience(req.userId, site, line));
 });
+// ---- 니치 관찰 (2026-08-14) -------------------------------------------------
+// 네이버 robots.txt 가 ClaudeBot 의 search.naver.com 접근을 금지하므로 서버에서
+// 검색결과를 긁을 수 없다. 망고오토 확장이 사용자 브라우저에서 모아 여기로 보낸다.
+app.post("/api/niche/observe", (req, res) => {
+  const { site = "naver", results } = req.body || {};
+  if (!Array.isArray(results)) return res.status(400).json({ error: "results 배열 필요" });
+  const n = DB.saveSerpTitles(req.userId, site, results);
+  res.json({ ok: true, saved: n, keywords: DB.serpKeywords(req.userId, site) });
+});
+app.get("/api/niche", (req, res) => {
+  const site = (req.query.site || "naver").toString();
+  const keyword = (req.query.keyword || "").toString() || null;
+  const rows = DB.serpTitles(req.userId, site, keyword);
+  res.json({
+    keywords: DB.serpKeywords(req.userId, site),
+    rows,
+    analysis: keyword ? PB.analyzeSerp(rows) : null,
+  });
+});
+
 // 초안 기계 검증 — 관리 페이지에서 기존 초안을 일괄 점검할 때 쓴다
 app.post("/api/playbook/validate", (req, res) => {
   const { site, title, content } = req.body || {};

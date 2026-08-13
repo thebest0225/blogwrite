@@ -211,6 +211,24 @@ function buildServer(userId) {
           } catch {}
           // 발행 완료된 글을 내부 링크 후보에 합친다. 정적 목록만 쓰면 새 글이
           // '함께 보면 좋은 글' 에 영원히 안 들어간다(예약발행은 주소가 나중에 붙는다).
+          // 실제 상위 노출 제목 관찰을 [쓰기 전 조사] 에 실어 보낸다.
+          // 추측으로 제목을 만들지 말고 이 숫자를 근거로 쓰게 한다.
+          let researchExtra = "";
+          if (site === "naver") {
+            try {
+              const kws = DB.serpKeywords(userId, "naver").slice(0, 6);
+              const byKw = kws.map((k) => ({
+                keyword: k.keyword, seen: k.seen,
+                rows: DB.serpTitles(userId, "naver", k.keyword, 10),
+              }));
+              const block = PB.renderSerp(byKw);
+              if (block) {
+                const sec = pb.sections.find((x) => x.section === "research");
+                researchExtra = (sec ? sec.body.trim() + "\n\n" : "") + block;
+              }
+            } catch (e) { console.error("[mcp] 니치 관찰 싣기 실패", e.message); }
+          }
+
           let linkExtra = "";
           let pubCount = 0, missCount = 0;
           if (site === "naver") {
@@ -224,7 +242,10 @@ function buildServer(userId) {
           }
           pbBlock = {
             site, playbook_enabled: true, meta: pb.meta,
-            playbook: PB.renderPlaybook(pb, linkExtra ? { links: linkExtra } : {}),
+            playbook: PB.renderPlaybook(pb, {
+              ...(linkExtra ? { links: linkExtra } : {}),
+              ...(researchExtra ? { research: researchExtra } : {}),
+            }),
             published_links: pubCount,
             published_without_url: missCount,
             already_written: recent,
