@@ -102,6 +102,7 @@ export function parseNaverDraft(content) {
   // 글 유형 — 경험형은 짧고 소제목 3개, 정보형은 길고 5~7개.
   // 하나의 규격으로 다 쓰면 훈련 글은 늘어지고 검역 글은 부실해진다.
   src = src.replace(/^\s*유형\s*[:：]\s*(.+)$/m, (_, v) => { meta.kind = v.trim(); return ""; });
+  src = src.replace(/^\s*깊이\s*[:：]\s*(.+)$/m, (_, v) => { meta.depth = v.trim(); return ""; });
 
   let tagLine = "";
   src = src.replace(/^\s*(#[^\s#]+(?:\s+#[^\s#]+){2,})\s*$/m, (_, v) => { tagLine = v.trim(); return ""; });
@@ -159,16 +160,18 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
   const t = String(title).trim();
 
   // ── 제목
-  if (t.length < 30 || t.length > 48) E.push(`제목이 ${t.length}자입니다 (30~48자)`);
+  if (t.length < 30 || t.length > 48) W.push(`제목이 ${t.length}자입니다 (모바일에서 잘리지 않는 건 대략 30~48자입니다)`);
   // ── 시점 표기는 '필요한 주제에만'
   //   모든 제목에 강제했더니 40건이 전부 '(2026년 8월)' 로 끝났다. 훈련법·해부·기본관리는
   //   내년에도 안 바뀌는데 날짜를 달면 오히려 낡은 글로 보인다.
   //   시점이 정보인 건 규정·요금·제도처럼 바뀌는 것, 그리고 계절 타는 것뿐이다.
-  const TIME_NEEDED = /검역|서류|규정|정책|법|항공|기내|화물|입국|비자|요금|비용|유지비|지원금|신청|무료|바뀌|개정|시행|숙소|호텔|렌터카|페리|대중교통|지하철/;
+  // ⚠️ '법' 을 단독으로 넣었더니 '~하는 법' 이 전부 걸렸다(줄당김·발톱 자르는 법 등).
+  //    제도를 뜻하는 말만 남긴다.
+  const TIME_NEEDED = /검역|서류|규정|정책|법령|법적|과태료|단속|항공|기내|화물|입국|비자|요금|비용|유지비|지원금|보조금|신청|무료|바뀌|개정|시행|숙소|호텔|렌터카|페리|대중교통|지하철|등록제/;
   const SEASONAL = /여름|장마|폭염|겨울|한파|봄|가을|휴가철|성수기|명절/;
   const hasTime = /20\d\d/.test(t);
   if ((TIME_NEEDED.test(t) || SEASONAL.test(t)) && !hasTime) {
-    E.push("제목에 시점이 없습니다 — 규정·요금·계절처럼 바뀌는 주제라 기준 시점이 필요합니다");
+    W.push("제목에 시점이 없습니다 — 규정·요금·계절처럼 바뀌는 주제라 기준 시점이 있으면 좋습니다");
   } else if (hasTime && !TIME_NEEDED.test(t) && !SEASONAL.test(t)) {
     W.push("이 주제는 시점이 필요 없어 보입니다 — 훈련·해부·기본관리는 내년에도 같습니다. " +
            "날짜를 빼면 제목에 쓸 글자가 늘어납니다");
@@ -176,7 +179,7 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
   if (BAN_TITLE.test(t)) E.push(`제목에 금지 표현이 있습니다 (${t.match(BAN_TITLE)[0]})`);
   for (const [city, country] of Object.entries(GEO_FOREIGN)) {
     if (t.includes(city) && !t.includes(country)) {
-      E.push(`제목에 '${city}' 만 있고 국가('${country}')가 없습니다 — 한국 사람은 '${country} ${city}' 로 검색합니다`);
+      W.push(`제목에 '${city}' 만 있고 국가('${country}')가 없습니다 — 한국 사람은 '${country} ${city}' 로 검색합니다`);
       break;
     }
   }
@@ -192,24 +195,37 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
   const tableChars = (p.tables || []).reduce(
     (n, tb) => n + tb.reduce((m, r) => m + r.join("").replace(/\s/g, "").length, 0), 0);
   const proseChars = p.charCount - Math.floor(tableChars / 2);
-  const isExp = /경험/.test(p.meta.kind || "");          // 유형 미표기는 정보형으로 본다
-  const kindName = isExp ? "경험형" : "정보형";
-  // 밴드는 실측 분포에 맞춘다. 처음에 경험형을 1,100~1,600 으로 잡았더니
-  // 기존 20건(중간 1,733자)의 내용을 잘라내야 했다. 짧게 만드는 게 목적이 아니라
-  // 늘어지지 않게 하는 게 목적이므로, 길이보다 소제목 수와 전개로 잡는다.
-  const [lo, hi] = isExp ? [1300, 2000] : [1700, 2600];
+  // ── 깊이 — 주제에 맞게 고른다
+  //   경험형/정보형 2분법이 너무 좁았다. 장소 추천은 가볍게 쓰면 되고
+  //   검역 절차는 논문처럼 깊게 써야 하는데 같은 밴드에 밀어 넣고 있었다.
+  //   밴드는 넓게 둔다 — 글자수로 글을 통제하려 들면 문장이 이상해진다.
+  const DEPTH = {
+    // ★구간을 넉넉히 겹친다. 밴드 사이에 틈이 있으면 어느 쪽으로도 안 맞는 글이 생긴다
+    //   (소제목 6개에 1,8xx자인 글이 '보통'에도 '깊게'에도 안 맞았다).
+    가볍게:   [600, 1500],   // 장소 추천 · 시즌 소식 · 짧은 후기
+    보통:     [1200, 2400],  // 경험 · 훈련 · 건강 신호
+    깊게:     [1700, 3600],  // 절차 · 규정 · 비교 · 지역 가이드
+    "아주 깊게": [3000, 9000],  // 제도 전체 해설 · 검역 전 과정
+  };
+  const kindRaw = String(p.meta.depth || p.meta.kind || "").trim();
+  let kindName = Object.keys(DEPTH).find((k) => kindRaw.includes(k));
+  // 옛 표기(경험형/정보형) 호환 — 둘 다 실측 중간이 1,7xx 자라 '보통' 이다.
+  // '정보형' 을 '깊게'(2,000~) 로 보냈더니 기존 글이 전부 밴드 아래로 떨어졌다.
+  if (!kindName) kindName = "보통";
+  const [lo, hi] = DEPTH[kindName];
   if (proseChars < lo || proseChars > hi)
-    E.push(`본문이 ${proseChars}자입니다 — ${kindName}은 ${lo.toLocaleString()}~${hi.toLocaleString()}자 (표 글자는 절반만 셈 / 전체 ${p.charCount}자)`);
-  if (!p.meta.kind) W.push("맨 위에 '유형: 경험형' 또는 '유형: 정보형' 줄이 없습니다 — 정보형으로 검사했습니다");
+    W.push(`본문이 ${proseChars}자입니다 — '${kindName}'은 보통 ${lo.toLocaleString()}~${hi.toLocaleString()}자입니다 (표 글자는 절반만 셈). 깊이를 바꾸거나 분량을 조정하세요`);
+  if (!p.meta.depth && !p.meta.kind)
+    W.push("맨 위에 '깊이: 가볍게|보통|깊게|아주 깊게' 줄이 없습니다 — '보통'으로 검사했습니다");
 
   // '정리하면 이래요' 는 마무리 표식이라 내용 소제목이 아니다. 하단 링크 제목도 마찬가지.
   const contentHeads = p.heads.filter(
     (h) => h !== "함께 보면 좋은 글" && !/^(정리하면|정리 —|마무리|한 줄 정리)/.test(h.trim()));
-  // 경험형은 소제목을 적게 두고 한 덩어리를 길게 쓴다 — 3~4개.
-  // 6~7개로 쪼개면 목차처럼 읽혀서 흐름이 끊긴다.
-  const [hLo, hHi] = isExp ? [3, 4] : [5, 7];
+  // 소제목 개수는 깊이에서 따라 나온다. 개수를 못 박으면 내용을 억지로 쪼개거나 붙이게 된다.
+  const HEADS = { 가볍게: [2, 4], 보통: [3, 6], 깊게: [4, 8], "아주 깊게": [5, 12] };
+  const [hLo, hHi] = HEADS[kindName];
   if (contentHeads.length < hLo || contentHeads.length > hHi)
-    E.push(`소제목이 ${contentHeads.length}개입니다 — ${kindName}은 ${hLo === hHi ? hLo + "개" : hLo + "~" + hHi + "개"} (하단 '함께 보면 좋은 글' 제외)`);
+    W.push(`소제목이 ${contentHeads.length}개입니다 — '${kindName}'은 보통 ${hLo}~${hHi}개입니다`);
 
   // ── 소제목이 문장형인지
   // 명사로 끝나는 소제목은 목차처럼 읽혀서 다음 문단을 읽을 이유를 못 준다.
@@ -219,7 +235,7 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
   if (/\*\*/.test(p.text)) E.push("본문에 ** 가 남아 있습니다 (소제목은 그 줄 하나만으로 문단을 이뤄야 합니다)");
 
   // ── 사진
-  if (p.photos.length < 2 || p.photos.length > 3) E.push(`사진 자리가 ${p.photos.length}개입니다 (2개 기본, 길면 3개)`);
+  if (p.photos.length < 2 || p.photos.length > 3) W.push(`사진 자리가 ${p.photos.length}개입니다 (보통 2~3개)`);
   for (const ph of p.photos) {
     const parts = ph.tags.split(/[+,\s]+/).filter(Boolean);
     const bad = parts.filter((x) => !PHOTO_TAGS.includes(x) && !SEASONS.includes(x));
@@ -327,12 +343,12 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
     [/vs|비교|보다|차이|어느 쪽/, "비교·대결"],
   ];
   if (!T_DEVICE.some(([re]) => re.test(t)))
-    E.push(`제목에 클릭할 이유가 없습니다 — 말줄임표·직접인용·질문형·반전·금지·비교 중 하나는 넣으세요 (지금은 '주제 ｜ 부제' 나열형)`);
+    W.push(`제목에 클릭할 이유가 안 보입니다 — 말줄임표·직접인용·질문형·반전·금지·비교 중 하나가 있으면 클릭률이 올라갑니다`);
 
   // ── 실용 밀도: '안 된다' 를 쓰고 대안이 없으면
   const negatives = (p.text.match(/안 되|안 됩니다|어렵습니다|제한이 있|불가/g) || []).length;
   const remedies = (p.text.match(/대신|되는 곳|되는 조건|찾는 방법|이렇게 물어|가능한 곳|대안/g) || []).length;
-  if (negatives >= 3 && remedies === 0) E.push(`'안 된다' 류가 ${negatives}번 나오는데 대안·되는 곳이 없습니다`);
+  if (negatives >= 3 && remedies === 0) W.push(`'안 된다' 류가 ${negatives}번 나오는데 대안·되는 곳이 없습니다 — 되는 쪽을 알려주세요`);
 
   // ── 표
   // 2행짜리 3열 표는 문장으로 쓰는 게 낫다. 표를 넣었다면 비교할 값이 있어야 한다.
@@ -342,8 +358,8 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
     const n = i + 1;
     const w = rows[0].length;
     if (rows.some((r) => r.length !== w)) E.push(`표${n} 의 열 수가 행마다 다릅니다 (자동 채우기가 깨집니다)`);
-    if (w < 3) E.push(`표${n} 이 ${w}열입니다 — 열을 하나 더 넣거나(비용·기한·연락방법 등) 불릿으로 바꾸세요`);
-    if (rows.length < 4) E.push(`표${n} 이 헤더 포함 ${rows.length}행입니다 — 비교 대상 3개 이상(4행)을 채우세요`);
+    if (w < 3) W.push(`표${n} 이 ${w}열입니다 — 열을 하나 더 넣거나 불릿으로 바꾸는 게 낫습니다`);
+    if (rows.length < 4) W.push(`표${n} 이 헤더 포함 ${rows.length}행입니다 — 비교 대상이 3개는 돼야 표로 쓸 값이 있습니다`);
     // 숫자·금액·규격이 하나도 없으면 표가 아니라 그냥 나열이다
     const digits = rows.slice(1).flat().join(" ");
     if (!/\d/.test(digits)) W.push(`표${n} 에 수치가 없습니다 — 금액·크기·개수·기한 중 하나는 넣어주세요`);
