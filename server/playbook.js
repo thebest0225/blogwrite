@@ -294,6 +294,35 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
   if (p.bodyLinks.length > 2)
     W.push(`본문 중간 링크가 ${p.bodyLinks.length}개입니다 (1~2개 권장)`);
 
+  // ── 제목이 장소·업체를 약속했으면 실제 이름을 대야 한다
+  //   '일본 도쿄 반려견 동반 숙소' 제목에 유형별 분류만 있고 이름이 '프린스' 하나였다.
+  //   도쿄 글과 오사카 글이 바꿔 써도 되는 글이 된다 — 차별성이 0이다.
+  //   원인은 [편집 원칙] 이 '판별법' 을 목록의 대체물로 허용한 것이었다.
+  //
+  //   ★판정 방식 — '이름을 센다' 는 두 번 실패했다. 표 첫 칸을 다 세니 '택시·도보' 가
+  //     이름이 됐고, '수식어+시설유형' 으로 좁히니 '객실 호텔·프렌들리 호텔' 이 걸렸다.
+  //     그래서 반대로 간다: 이름 대신 ★유형 나열★ 을 잡는다. 이건 신호가 깨끗하다 —
+  //     유형 표는 머리글에 '유형·종류·구분' 이 박히고 칸이 일반명사로 시작한다.
+  const PROMISES_PLACE = /숙소|호텔|펜션|리조트|해변|계곡|식당|카페|공원|산책코스|등산로|수목원|캠핑|휴양림|펫호텔|되는 곳|업체/;
+  if (PROMISES_PLACE.test(t)) {
+    const GENERIC = /^(펫|반려|애견|대형|소형|중형|부티크|일반|전용|고급|저가|체인|기타|유형|구분|종류|현지|해외|국내|근처|주변|일부|각종|여러)/;
+    let typeTable = false, nameRows = 0;
+    for (const tb of p.tables) {
+      const header = (tb[0] || []).join(" ");
+      const firstCol = tb.slice(1).map((r) => (r[0] || "").trim()).filter(Boolean);
+      if (!firstCol.length) continue;
+      const generic = firstCol.filter((c) => GENERIC.test(c)).length;
+      // 머리글이 '유형/종류/구분' 이거나 첫 칸 절반 이상이 일반명사면 유형 표다
+      if (/유형|종류|구분/.test(header) || generic * 2 >= firstCol.length) typeTable = true;
+      else nameRows += firstCol.length;
+    }
+    if (typeTable && nameRows < 4)
+      W.push("장소·업체를 약속한 제목인데 표가 '유형별 분류' 입니다 — " +
+             "유형은 독자가 이미 압니다. 실제 이름 5~6곳을 조건·비용·예약방법과 함께 대세요");
+    else if (!p.tables.length)
+      W.push("장소·업체를 약속한 제목인데 목록이 없습니다 — 실제 이름 5~6곳을 표로 정리하세요");
+  }
+
   // ── 정보 밀도 — 분량만 재니 물로 채운 글이 통과했다
   //   재입국 검역 글이 2,023자였는데 구체적인 값은 '0.5IU' 하나뿐이었다.
   //   나머지는 '몇 주 걸려요' '나라마다 달라요' 로 넘어갔다. 그 자리가 글의 알맹이다.
