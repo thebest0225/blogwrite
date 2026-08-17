@@ -160,7 +160,19 @@ export function validateNaverDraft({ title = "", content = "", allowedLinks = []
 
   // ── 제목
   if (t.length < 30 || t.length > 48) E.push(`제목이 ${t.length}자입니다 (30~48자)`);
-  if (!/20\d\d/.test(t)) E.push("제목에 시점이 없습니다 (예: 2026년 8월 기준)");
+  // ── 시점 표기는 '필요한 주제에만'
+  //   모든 제목에 강제했더니 40건이 전부 '(2026년 8월)' 로 끝났다. 훈련법·해부·기본관리는
+  //   내년에도 안 바뀌는데 날짜를 달면 오히려 낡은 글로 보인다.
+  //   시점이 정보인 건 규정·요금·제도처럼 바뀌는 것, 그리고 계절 타는 것뿐이다.
+  const TIME_NEEDED = /검역|서류|규정|정책|법|항공|기내|화물|입국|비자|요금|비용|유지비|지원금|신청|무료|바뀌|개정|시행|숙소|호텔|렌터카|페리|대중교통|지하철/;
+  const SEASONAL = /여름|장마|폭염|겨울|한파|봄|가을|휴가철|성수기|명절/;
+  const hasTime = /20\d\d/.test(t);
+  if ((TIME_NEEDED.test(t) || SEASONAL.test(t)) && !hasTime) {
+    E.push("제목에 시점이 없습니다 — 규정·요금·계절처럼 바뀌는 주제라 기준 시점이 필요합니다");
+  } else if (hasTime && !TIME_NEEDED.test(t) && !SEASONAL.test(t)) {
+    W.push("이 주제는 시점이 필요 없어 보입니다 — 훈련·해부·기본관리는 내년에도 같습니다. " +
+           "날짜를 빼면 제목에 쓸 글자가 늘어납니다");
+  }
   if (BAN_TITLE.test(t)) E.push(`제목에 금지 표현이 있습니다 (${t.match(BAN_TITLE)[0]})`);
   for (const [city, country] of Object.entries(GEO_FOREIGN)) {
     if (t.includes(city) && !t.includes(country)) {
