@@ -203,3 +203,41 @@ for(const r of db.prepare(\"select title,content from drafts where content like 
   if(m){ console.log('── '+r.title.slice(0,40)); m.forEach(x=>console.log('   '+x.trim())); }
 }"
 ```
+
+## 2차 수정 (2026-08-17) — 발행 안 한 28건만
+
+사용자 지적 — "아직 자연스럽지 못하다. 애로사항을 자꾸 애로로 줄이고, 도입부가 본문과
+연결이 안 되고, 결국 AI 느낌이 나고, 제목이 클릭하고 싶어지지 않는다."
+
+측정해보니 전부 **내 규칙이 만든 틀**이었다.
+
+| 틀 | 빈도 | 원인 |
+|---|---|---|
+| `정리하면` 으로 마무리 시작 | **35/40** | 예시를 그대로 베낌 |
+| `아직 남은 애로사항은` | **10/40** | [편집 원칙] 이 그 단어를 요구 |
+| 제목에 클릭 장치 없음 | **33/40** | 강제하지 않아서 |
+| `그 뒤로 순서를 바꿨어요` | 4/40 | 경험 자산 인용 틀 |
+
+인사말 35건 획일화와 **같은 실수를 반복**했다. 규칙이 요소를 강제하면 그 요소가
+똑같은 문장으로 굳는다. 한 건만 검사해서는 절대 안 보인다.
+
+### 새로 생긴 안전장치
+`crossDraftRepeats(drafts, limit)` — 초안 전체를 가로질러 같은 상투구가 몇 건에
+나오는지 센다. 첫 문장·마지막 문장 중복도 잡는다(목록에 없는 새 틀도 걸린다).
+```bash
+cd /var/www/mangoabba/blogwrite/server
+node -e "
+const D=require('better-sqlite3'),db=new D('blogwrite.db',{readonly:true});
+import('./playbook.js').then(m=>{
+  const rows=db.prepare(\"select id,title,content from drafts where content like '%## 썸네일%'\").all();
+  m.crossDraftRepeats(rows).forEach(r=>console.log(r.n+'/'+r.total+'  '+r.name));
+});"
+```
+
+### 검증기에 추가된 것
+- 틀 5종 경고 (아직 애로 / 정리하면 / 세 줄 요약 예고 / 예고형 도입부 닫기 / 그 뒤로 순서를)
+- **제목 장치 없으면 오류** — 말줄임표·직접인용·질문형·반전·금지·비교 중 하나 필수
+
+### 대상
+`UNPUBLISHED_IDS.txt` 의 28건만. **이미 발행한 12건은 건드리지 마라** —
+초안을 고쳐도 네이버에 올라간 글은 안 바뀌므로 헛수고이고, 발행본과 초안이 어긋난다.
