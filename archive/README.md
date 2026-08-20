@@ -35,5 +35,5 @@ unpublished_20260820/
 
 ### 되살리는 법
 `.json` 의 `title` / `html` / `article_json` 을 그대로 써서 발행하면 된다.
-DB 로 직접 복원하려면 정리 직전 백업이 `/tmp/blogwrite.db.bak_before_cleanup_2229` 에 있다
-(임시 폴더이므로 재부팅 시 사라진다 — 오래 보관할 거면 옮겨둘 것).
+DB 로 직접 복원하려면 정리 직전 백업이
+`/var/backups/blogwrite/blogwrite.db.bak_20260820_cleanup` 에 있다.
