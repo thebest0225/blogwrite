@@ -25,6 +25,17 @@ const TG_CHAT  = process.env.TG_CHAT  || '7076008136';
 const GOOGLE_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 
+// ── 알림 음소거 (운영자가 의도적으로 미뤄둔 항목) ──
+// 여기 있는 destination_id 는 검사는 하되 '문제'로 집계하지 않는다 → 텔레그램 안 감.
+// 다시 쓰기 시작하면 이 목록에서 빼라.
+const MUTED = {
+  // 2026-08-20: 글 퀄리티 업그레이드 후 재개 예정. 초안함 20건은 운영자가 수동 처리 중.
+  //             naver 플레이북도 중지(playbook_enabled=false) 해서 신규 생성 안 됨.
+  naver_mango: '운영자 요청 — 품질 업그레이드 후 재개 예정',
+  // 2026-08-20: OAuth 재연결을 나중에 하기로 함. 그때까지 매일 알리지 않는다.
+  accmroylv7ff7df55: '운영자 요청 — 구글 재연결 보류',
+};
+
 const problems = [];
 const lines = [];
 const log = (s) => { lines.push(s); if (!QUIET) console.log(s); };
@@ -72,8 +83,10 @@ for (const d of db.prepare('SELECT id,name,platform,site_url,creds,enabled FROM 
   else if (d.platform === 'wordpress') err = await checkWordpress(d, creds);
   else { log(`  – ${d.name} (${d.platform}) — 자동검사 대상 아님`); continue; }
 
-  if (err) { problems.push(err); log('  ' + err.replace(/\n/g, '\n  ')); }
-  else log(`  ✅ ${d.name} (${d.platform})`);
+  if (err) {
+    if (MUTED[d.id]) log(`  🔇 ${err.split('\n')[0]}  [음소거: ${MUTED[d.id]}]`);
+    else { problems.push(err); log('  ' + err.replace(/\n/g, '\n  ')); }
+  } else log(`  ✅ ${d.name} (${d.platform})`);
 }
 
 // 정체된 발행 건 — 3일 넘게 published 가 아닌 것
@@ -81,20 +94,43 @@ for (const d of db.prepare('SELECT id,name,platform,site_url,creds,enabled FROM 
 // → 문제로 세지 않고 정보로만 알린다. 자동발행 대상(wordpress/blogger)만 문제로 집계.
 const platformOf = Object.fromEntries(
   db.prepare('SELECT id, platform FROM destinations').all().map((d) => [d.id, d.platform]));
+// 🔑 판정 기준 (2026-08-20 개선): 단순히 '오래 안 발행된 건' 을 문제로 보면
+//    버려진 옛 초안까지 매일 알림이 온다 (08-04 잔재 9건 × 3사이트 사례).
+//    진짜 신호는 "그 초안 이후로 그 사이트가 한 번도 발행에 성공하지 못했다" 다.
+//    → 정체 건보다 나중에 성공한 발행이 있으면 파이프라인은 살아있는 것이므로 제외.
 const stuck = db.prepare(`
   SELECT w.destination_id, w.status, count(*) n, min(w.created_at) oldest
   FROM work_items w
   WHERE w.status <> 'published' AND w.created_at < datetime('now','-3 days')
+    AND NOT EXISTS (
+      SELECT 1 FROM work_items p
+      WHERE p.destination_id = w.destination_id AND p.status = 'published'
+        AND p.created_at > w.created_at)
   GROUP BY w.destination_id, w.status`).all();
 if (stuck.length) {
   log('  ── 정체된 발행 건 (3일+ 미발행)');
   for (const s of stuck) {
     const auto = ['wordpress', 'blogger'].includes(platformOf[s.destination_id]);
-    const msg = `${auto ? '⚠️' : 'ℹ️'} ${s.destination_id}: '${s.status}' ${s.n}건 정체 (최초 ${String(s.oldest).slice(0, 16)})`
-              + (auto ? '' : ' — 확장 대기중일 수 있음');
-    if (auto) problems.push(msg);
+    const muted = !!MUTED[s.destination_id];
+    const mark = muted ? '🔇' : (auto ? '⚠️' : 'ℹ️');
+    const msg = `${mark} ${s.destination_id}: '${s.status}' ${s.n}건 정체 (최초 ${String(s.oldest).slice(0, 16)})`
+              + (muted ? ' — 음소거' : (auto ? '' : ' — 확장 대기중일 수 있음'));
+    if (auto && !muted) problems.push(msg);
     log('     ' + msg);
   }
+}
+
+// 참고용 — 이후 발행이 성공한 '버려진 옛 초안' 개수 (문제 아님, 정리 대상)
+const abandoned = db.prepare(`
+  SELECT w.destination_id, count(*) n FROM work_items w
+  WHERE w.status <> 'published' AND w.created_at < datetime('now','-3 days')
+    AND EXISTS (SELECT 1 FROM work_items p
+                WHERE p.destination_id = w.destination_id AND p.status='published'
+                  AND p.created_at > w.created_at)
+  GROUP BY w.destination_id`).all();
+if (abandoned.length) {
+  log('  ── 버려진 옛 초안 (이후 발행 성공함 → 파이프라인 정상, 정리만 필요)');
+  for (const a of abandoned) log(`     · ${a.destination_id}: ${a.n}건`);
 }
 
 // 최근 3일간 발행 0건인 활성 대상 — 루틴이 그 사이트를 빼먹고 있다는 신호
@@ -105,6 +141,7 @@ const silent = db.prepare(`
                     WHERE w.destination_id=d.id AND w.status='published'
                       AND w.created_at >= datetime('now','-3 days'))`).all();
 for (const s of silent) {
+  if (MUTED[s.id]) { log(`     🔇 ${s.name}: 최근 3일 발행 0건 — 음소거 (${MUTED[s.id]})`); continue; }
   const msg = `⚠️ ${s.name}: 최근 3일간 발행 0건 — 루틴에서 빠졌는지 확인`;
   problems.push(msg); log('     ' + msg);
 }
